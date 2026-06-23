@@ -1,0 +1,1062 @@
+-- ESP & Combat System
+-- Rayfield UI | Fast Auto Kill | ESP | Proximity
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ===== LOADING RAYFIELD =====
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- ===== SETTINGS =====
+local Settings = {
+    InfAmmo_Enabled = false,
+    AutoKill_Enabled = false,
+    AutoKill_Delay = 0,
+    AutoKill_BurstCount = 10,
+
+    NPC_ESP_Enabled = false,
+    NPC_NameTags_Enabled = false,
+    NPC_MaxDistance = 1000,
+    NPC_ESPColor = Color3.fromRGB(255, 0, 0),
+    NPC_NameTagColor = Color3.fromRGB(255, 255, 255),
+    NPC_FillTransparency = 0.7,
+    NPC_OutlineTransparency = 0,
+    NPC_NameTagSize = 14,
+    NPC_SelectedEntities = {},
+
+    Loot_ESP_Enabled = false,
+    Loot_NameTags_Enabled = false,
+    Loot_MaxDistance = 500,
+    Loot_FillTransparency = 0.5,
+    Loot_OutlineTransparency = 0,
+    Loot_NameTagSize = 12,
+    Loot_SelectedRarities = {},
+
+    Proximity_Enabled = false,
+    Proximity_Radius = 30,
+    Proximity_Delay = 0.1,
+}
+
+-- Immortal NPCs (skipped)
+local IMMORTAL_NPCS = {
+    ["Phantom"] = true,
+    ["Armory"] = true,
+}
+
+local RarityColors = {
+    [1] = Color3.fromRGB(255, 255, 255),
+    [2] = Color3.fromRGB(0, 255, 0),
+    [3] = Color3.fromRGB(0, 170, 255),
+    [4] = Color3.fromRGB(170, 0, 255),
+    [5] = Color3.fromRGB(255, 215, 0),
+}
+
+local RarityNames = {
+    [1] = "Common",
+    [2] = "Uncommon",
+    [3] = "Rare",
+    [4] = "Epic",
+    [5] = "Legendary",
+}
+
+local npcESPObjects = {}
+local lootESPObjects = {}
+local allNPCNames = {}
+local allNPCModels = {}
+
+local ESPFolder = Instance.new("Folder")
+ESPFolder.Name = "ESP_Folder"
+ESPFolder.Parent = CoreGui
+
+local autoKillStats = { kills = 0, skipped = 0 }
+local proximityStats = { fired = 0 }
+
+-- ===== UTILITIES =====
+local function getRootPart(model)
+    return model:FindFirstChild("HumanoidRootPart")
+        or model:FindFirstChild("Head")
+        or model:FindFirstChild("Torso")
+        or model:FindFirstChild("UpperTorso")
+        or (function()
+            for _, v in pairs(model:GetDescendants()) do
+                if v:IsA("BasePart") then return v end
+            end
+            return nil
+        end)()
+end
+
+local function getHead(model)
+    return model:FindFirstChild("Head")
+        or model:FindFirstChild("HumanoidRootPart")
+        or getRootPart(model)
+end
+
+local function isNPCModel(obj)
+    if not obj:IsA("Model") then return false end
+    for _, v in pairs(obj:GetDescendants()) do
+        if v:IsA("BasePart") then return true end
+    end
+    return false
+end
+
+local function isImmortal(name)
+    if IMMORTAL_NPCS[name] then return true end
+    local lower = name:lower()
+    for immortalName in pairs(IMMORTAL_NPCS) do
+        if lower:find(immortalName:lower()) then return true end
+    end
+    return false
+end
+
+local function isEntitySelected(name)
+    if #Settings.NPC_SelectedEntities == 0 then return false end
+    for _, v in ipairs(Settings.NPC_SelectedEntities) do
+        if v == name then return true end
+    end
+    return false
+end
+
+local function isRaritySelected(rarity)
+    if #Settings.Loot_SelectedRarities == 0 then return false end
+    for _, v in ipairs(Settings.Loot_SelectedRarities) do
+        if tostring(v) == tostring(rarity) then return true end
+    end
+    return false
+end
+
+local function getDistance(part)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and part then
+        return (hrp.Position - part.Position).Magnitude
+    end
+    return math.huge
+end
+
+local function getPlayerRoot()
+    local char = LocalPlayer.Character
+    if char then
+        return char:FindFirstChild("HumanoidRootPart")
+            or char:FindFirstChild("UpperTorso")
+            or char:FindFirstChild("Torso")
+    end
+    return nil
+end
+
+local function getEquippedWeapon()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, tool in pairs(char:GetChildren()) do
+        if tool:IsA("Tool") then return tool end
+    end
+    return nil
+end
+
+local function getMuzzle(weapon)
+    if not weapon then return nil end
+    local model = weapon:FindFirstChild("Model")
+    if model then
+        local grip = model:FindFirstChild("Grip")
+        if grip then
+            local muzzle = grip:FindFirstChild("Muzzle")
+            if muzzle then return muzzle end
+        end
+    end
+    for _, v in pairs(weapon:GetDescendants()) do
+        if v.Name == "Muzzle" then return v end
+    end
+    return nil
+end
+
+-- ===== REMOTES (Cache) =====
+local Remotes = {}
+
+local function getRemotes()
+    pcall(function()
+        local r = ReplicatedStorage.Game.Events.Remotes
+        Remotes.OnHit = r:FindFirstChild("OnHit")
+        Remotes.Fire = r:FindFirstChild("Fire")
+        Remotes.ChangeAmmo = r:FindFirstChild("ChangeAmmo")
+    end)
+end
+
+getRemotes()
+
+-- ===== INF AMMO =====
+local ammoRemoteDeleted = false
+
+local function enableInfAmmo()
+    getRemotes()
+    if Remotes.ChangeAmmo then
+        Remotes.ChangeAmmo:Destroy()
+        Remotes.ChangeAmmo = nil
+        ammoRemoteDeleted = true
+    end
+end
+
+-- ===== AUTO KILL (FAST) =====
+local function getAllAliveNPCs()
+    local npcs = {}
+    local npcFolderWS = Workspace:FindFirstChild("NPCs")
+    if not npcFolderWS then return npcs end
+
+    for _, obj in pairs(npcFolderWS:GetDescendants()) do
+        if obj:IsA("Model") and not isImmortal(obj.Name) then
+            local humanoid = obj:FindFirstChildOfClass("Humanoid")
+            local rootPart = obj:FindFirstChild("HumanoidRootPart")
+            local head = obj:FindFirstChild("Head")
+
+            if humanoid and humanoid.Health > 0 and rootPart then
+                table.insert(npcs, {
+                    model = obj,
+                    name = obj.Name,
+                    humanoid = humanoid,
+                    rootPart = rootPart,
+                    head = head or rootPart,
+                })
+            end
+        end
+    end
+    return npcs
+end
+
+local function burstKillNPC(npcData, weapon, muzzle, playerRoot)
+    if not npcData.humanoid or npcData.humanoid.Health <= 0 then return end
+    if not npcData.rootPart or not npcData.rootPart.Parent then return end
+
+    local hitPos = npcData.head.Position
+    local firePos = playerRoot.Position
+    local hitNormal = (firePos - hitPos).Unit
+    local endPos = hitPos + (hitPos - firePos).Unit * 5
+
+    if Remotes.OnHit then
+        pcall(function()
+            Remotes.OnHit:FireServer(
+                {
+                    {
+                        hitPos = hitPos,
+                        targetRoot = npcData.rootPart,
+                        humanoid = npcData.humanoid,
+                        hitPart = npcData.head,
+                        hitNormal = hitNormal,
+                    }
+                },
+                {
+                    bulletHoleSize = 0.65,
+                    tracerSpeed = 320,
+                    tracers = true,
+                    tracerColor = nil,
+                    muzzleChance = 10,
+                }
+            )
+        end)
+    end
+
+    if Remotes.Fire then
+        pcall(function()
+            Remotes.Fire:FireServer(
+                weapon,
+                firePos,
+                muzzle,
+                {
+                    hits = { hitPos }
+                },
+                {
+                    bulletHoleSize = 0.65,
+                    tracerSpeed = 320,
+                    tracers = true,
+                    tracerColor = nil,
+                    muzzleChance = 10,
+                },
+                endPos
+            )
+        end)
+    end
+
+    autoKillStats.kills = autoKillStats.kills + 1
+end
+
+-- Auto Kill Loop
+task.spawn(function()
+    while true do
+        if Settings.AutoKill_Delay > 0 then
+            task.wait(Settings.AutoKill_Delay)
+        else
+            RunService.Heartbeat:Wait()
+        end
+
+        if not Settings.AutoKill_Enabled then continue end
+
+        local weapon = getEquippedWeapon()
+        if not weapon then continue end
+
+        local muzzle = getMuzzle(weapon)
+        local playerRoot = getPlayerRoot()
+        if not playerRoot then continue end
+
+        if not Remotes.OnHit or not Remotes.Fire then
+            getRemotes()
+            if not Remotes.OnHit and not Remotes.Fire then continue end
+        end
+
+        local npcs = getAllAliveNPCs()
+
+        for _, npcData in ipairs(npcs) do
+            if not Settings.AutoKill_Enabled then break end
+            if npcData.humanoid and npcData.humanoid.Health > 0 then
+                for _ = 1, Settings.AutoKill_BurstCount do
+                    if npcData.humanoid.Health <= 0 then break end
+                    burstKillNPC(npcData, weapon, muzzle, playerRoot)
+                end
+            end
+        end
+    end
+end)
+
+-- ===== NPC ESP =====
+local npcFolder = nil
+
+local function findNPCFolder()
+    npcFolder = Workspace:FindFirstChild("NPCs")
+    if not npcFolder then
+        pcall(function() npcFolder = Workspace:WaitForChild("NPCs", 5) end)
+    end
+    return npcFolder
+end
+
+local function createNPCNameTag(model)
+    local head = getHead(model)
+    if not head then return nil end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "NPC_Tag"
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0, 200, 0, 30)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = Settings.NPC_MaxDistance
+    billboard.Parent = ESPFolder
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = model.Name
+    nameLabel.TextColor3 = Settings.NPC_NameTagColor
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextSize = Settings.NPC_NameTagSize
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+    nameLabel.Parent = billboard
+
+    return billboard
+end
+
+local function createNPCHighlight(model)
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "NPC_HL"
+    highlight.FillColor = Settings.NPC_ESPColor
+    highlight.OutlineColor = Settings.NPC_ESPColor
+    highlight.FillTransparency = Settings.NPC_FillTransparency
+    highlight.OutlineTransparency = Settings.NPC_OutlineTransparency
+    highlight.Adornee = model
+    highlight.Enabled = Settings.NPC_ESP_Enabled
+    highlight.Parent = ESPFolder
+    return highlight
+end
+
+local function addNPCESP(model)
+    if npcESPObjects[model] then return end
+    npcESPObjects[model] = {
+        model = model,
+        nameTag = createNPCNameTag(model),
+        highlight = createNPCHighlight(model),
+    }
+end
+
+local function removeNPCESP(model)
+    local data = npcESPObjects[model]
+    if not data then return end
+    if data.nameTag then data.nameTag:Destroy() end
+    if data.highlight then data.highlight:Destroy() end
+    npcESPObjects[model] = nil
+end
+
+local function removeAllNPCESP()
+    for model in pairs(npcESPObjects) do removeNPCESP(model) end
+end
+
+local function rebuildNPCESP()
+    removeAllNPCESP()
+    for _, model in ipairs(allNPCModels) do
+        if model and model.Parent and isEntitySelected(model.Name) then
+            addNPCESP(model)
+        end
+    end
+end
+
+local function scanNPCFolder(folder)
+    if not folder then return end
+    for _, obj in pairs(folder:GetChildren()) do
+        if isNPCModel(obj) then
+            if not table.find(allNPCModels, obj) then table.insert(allNPCModels, obj) end
+            if not table.find(allNPCNames, obj.Name) then table.insert(allNPCNames, obj.Name) end
+            if isEntitySelected(obj.Name) then addNPCESP(obj) end
+        elseif obj:IsA("Folder") or obj:IsA("Model") then
+            scanNPCFolder(obj)
+        end
+    end
+end
+
+local function listenNPCFolder(folder)
+    if not folder then return end
+    folder.ChildAdded:Connect(function(child)
+        task.wait(0.1)
+        if isNPCModel(child) then
+            if not table.find(allNPCModels, child) then table.insert(allNPCModels, child) end
+            if not table.find(allNPCNames, child.Name) then table.insert(allNPCNames, child.Name) end
+            if isEntitySelected(child.Name) then addNPCESP(child) end
+        elseif child:IsA("Folder") or child:IsA("Model") then
+            scanNPCFolder(child)
+            listenNPCFolder(child)
+        end
+    end)
+    folder.ChildRemoved:Connect(function(child)
+        if npcESPObjects[child] then removeNPCESP(child) end
+        for i, m in ipairs(allNPCModels) do
+            if m == child then table.remove(allNPCModels, i) break end
+        end
+    end)
+    for _, obj in pairs(folder:GetChildren()) do
+        if obj:IsA("Folder") then listenNPCFolder(obj) end
+    end
+end
+
+-- ===== LOOT ESP =====
+local lootFolder = nil
+
+local function findLootFolder()
+    pcall(function()
+        lootFolder = Workspace:WaitForChild("Game", 5)
+            :WaitForChild("Items", 5)
+            :WaitForChild("Boxes", 5)
+            :WaitForChild("Special", 5)
+    end)
+    return lootFolder
+end
+
+local function getRarityFromBox(box)
+    local body = box:FindFirstChild("Body")
+    if not body then
+        for _, v in pairs(box:GetDescendants()) do
+            if v.Name == "Body" then body = v break end
+        end
+    end
+    if body then
+        local rarity = body:FindFirstChild("Rarity")
+        if rarity then
+            if rarity:IsA("IntValue") or rarity:IsA("NumberValue") then return rarity.Value end
+            if rarity:IsA("StringValue") then return tonumber(rarity.Value) or 0 end
+        end
+    end
+    local n = box.Name:lower()
+    if n:find("5") or n:find("legendary") then return 5
+    elseif n:find("4") or n:find("epic") then return 4
+    elseif n:find("3") or n:find("rare") then return 3
+    elseif n:find("2") or n:find("uncommon") then return 2
+    elseif n:find("1") or n:find("common") then return 1 end
+    return 0
+end
+
+local function createLootNameTag(box, rarity)
+    local part = box:FindFirstChild("Body") or getRootPart(box)
+    if not part then
+        for _, v in pairs(box:GetDescendants()) do
+            if v:IsA("BasePart") then part = v break end
+        end
+    end
+    if not part then return nil end
+
+    local color = RarityColors[rarity] or Color3.fromRGB(255, 255, 255)
+    local rarityName = RarityNames[rarity] or ("Rarity " .. tostring(rarity))
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "Loot_Tag"
+    billboard.Adornee = part
+    billboard.Size = UDim2.new(0, 150, 0, 25)
+    billboard.StudsOffset = Vector3.new(0, 2, 0)
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = Settings.Loot_MaxDistance
+    billboard.Parent = ESPFolder
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = "📦 " .. rarityName
+    nameLabel.TextColor3 = color
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextSize = Settings.Loot_NameTagSize
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+    nameLabel.Parent = billboard
+
+    return billboard
+end
+
+local function createLootHighlight(box, rarity)
+    local color = RarityColors[rarity] or Color3.fromRGB(255, 255, 255)
+    local hl = Instance.new("Highlight")
+    hl.Name = "Loot_HL"
+    hl.FillColor = color
+    hl.OutlineColor = color
+    hl.FillTransparency = Settings.Loot_FillTransparency
+    hl.OutlineTransparency = Settings.Loot_OutlineTransparency
+    hl.Adornee = box
+    hl.Enabled = Settings.Loot_ESP_Enabled
+    hl.Parent = ESPFolder
+    return hl
+end
+
+local function addLootESP(box)
+    if lootESPObjects[box] then return end
+    local rarity = getRarityFromBox(box)
+    if rarity == 0 or not isRaritySelected(rarity) then return end
+    lootESPObjects[box] = {
+        box = box,
+        rarity = rarity,
+        nameTag = createLootNameTag(box, rarity),
+        highlight = createLootHighlight(box, rarity),
+    }
+end
+
+local function removeLootESP(box)
+    local data = lootESPObjects[box]
+    if not data then return end
+    if data.nameTag then data.nameTag:Destroy() end
+    if data.highlight then data.highlight:Destroy() end
+    lootESPObjects[box] = nil
+end
+
+local function removeAllLootESP()
+    for box in pairs(lootESPObjects) do removeLootESP(box) end
+end
+
+local function rebuildLootESP()
+    removeAllLootESP()
+    if not lootFolder then return end
+    for _, box in pairs(lootFolder:GetDescendants()) do
+        if box:IsA("Model") or box:IsA("BasePart") then
+            local rarity = getRarityFromBox(box)
+            if rarity > 0 and isRaritySelected(rarity) then addLootESP(box) end
+        end
+    end
+end
+
+local function scanLootFolder(folder)
+    if not folder then return end
+    for _, obj in pairs(folder:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("BasePart") then
+            local rarity = getRarityFromBox(obj)
+            if rarity > 0 and isRaritySelected(rarity) then addLootESP(obj) end
+        end
+    end
+end
+
+local function listenLootFolder(folder)
+    if not folder then return end
+    folder.DescendantAdded:Connect(function(child)
+        task.wait(0.1)
+        if child:IsA("Model") or child:IsA("BasePart") then
+            local rarity = getRarityFromBox(child)
+            if rarity > 0 and isRaritySelected(rarity) then addLootESP(child) end
+        end
+    end)
+    folder.DescendantRemoving:Connect(function(child)
+        if lootESPObjects[child] then removeLootESP(child) end
+    end)
+end
+
+-- ===== PROXIMITY =====
+task.spawn(function()
+    while true do
+        task.wait(Settings.Proximity_Delay)
+        if not Settings.Proximity_Enabled then continue end
+        local root = getPlayerRoot()
+        if not root then continue end
+        for _, prompt in ipairs(workspace:GetDescendants()) do
+            if prompt:IsA("ProximityPrompt") then
+                local part = prompt:FindFirstAncestorWhichIsA("BasePart")
+                if part and (part.Position - root.Position).Magnitude <= Settings.Proximity_Radius then
+                    pcall(function()
+                        fireproximityprompt(prompt)
+                        proximityStats.fired = proximityStats.fired + 1
+                    end)
+                end
+            end
+        end
+    end
+end)
+
+-- ===== UPDATE ESP =====
+local function updateESP()
+    for model, data in pairs(npcESPObjects) do
+        if not model or not model.Parent then removeNPCESP(model) continue end
+        if not isEntitySelected(model.Name) then removeNPCESP(model) continue end
+        local rootPart = getRootPart(model)
+        if not rootPart then continue end
+        local dist = getDistance(rootPart)
+        local far = dist > Settings.NPC_MaxDistance
+
+        if data.highlight then
+            data.highlight.Enabled = Settings.NPC_ESP_Enabled and not far
+            data.highlight.FillColor = Settings.NPC_ESPColor
+            data.highlight.OutlineColor = Settings.NPC_ESPColor
+            data.highlight.FillTransparency = Settings.NPC_FillTransparency
+            data.highlight.OutlineTransparency = Settings.NPC_OutlineTransparency
+        end
+        if data.nameTag then
+            data.nameTag.Enabled = Settings.NPC_NameTags_Enabled and not far
+            data.nameTag.MaxDistance = Settings.NPC_MaxDistance
+            local nl = data.nameTag:FindFirstChild("NameLabel")
+            if nl then
+                nl.Text = model.Name
+                nl.TextColor3 = Settings.NPC_NameTagColor
+                nl.TextSize = Settings.NPC_NameTagSize
+            end
+        end
+    end
+
+    for box, data in pairs(lootESPObjects) do
+        if not box or not box.Parent then removeLootESP(box) continue end
+        if not isRaritySelected(data.rarity) then removeLootESP(box) continue end
+        local part = box:FindFirstChild("Body") or getRootPart(box)
+        if not part then
+            for _, v in pairs(box:GetDescendants()) do
+                if v:IsA("BasePart") then part = v break end
+            end
+        end
+        local dist = part and getDistance(part) or math.huge
+        local far = dist > Settings.Loot_MaxDistance
+
+        if data.highlight then
+            data.highlight.Enabled = Settings.Loot_ESP_Enabled and not far
+            data.highlight.FillTransparency = Settings.Loot_FillTransparency
+            data.highlight.OutlineTransparency = Settings.Loot_OutlineTransparency
+        end
+        if data.nameTag then
+            data.nameTag.Enabled = Settings.Loot_NameTags_Enabled and not far
+            data.nameTag.MaxDistance = Settings.Loot_MaxDistance
+            local nl = data.nameTag:FindFirstChild("NameLabel")
+            if nl then nl.TextSize = Settings.Loot_NameTagSize end
+        end
+    end
+end
+
+-- ===== INIT =====
+local function initAll()
+    allNPCModels = {}
+    allNPCNames = {}
+    findNPCFolder()
+    if npcFolder then scanNPCFolder(npcFolder) listenNPCFolder(npcFolder) end
+    table.sort(allNPCNames)
+    findLootFolder()
+    if lootFolder then scanLootFolder(lootFolder) listenLootFolder(lootFolder) end
+    getRemotes()
+end
+
+task.spawn(initAll)
+
+-- ===== RAYFIELD UI =====
+local Window = Rayfield:CreateWindow({
+    Name = "🎯 ESP & Combat",
+    LoadingTitle = "ESP & Combat",
+    LoadingSubtitle = "Loading...",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "ESP_Combat",
+        FileName = "Config"
+    },
+    KeySystem = false,
+})
+
+-- ============================================================
+-- TAB 1: MAIN
+-- ============================================================
+local MainTab = Window:CreateTab("⚔️ Main", 4483362458)
+
+MainTab:CreateSection("🔫 Infinite Ammo")
+
+MainTab:CreateParagraph({
+    Title = "⚠️ Important",
+    Content = "Reload ALL weapons before enabling!\nDeletes the ChangeAmmo remote."
+})
+
+local infAmmoLabel = MainTab:CreateLabel("Status: ❌ Not Activated")
+
+MainTab:CreateButton({
+    Name = "⚡ Activate Inf Ammo",
+    Callback = function()
+        enableInfAmmo()
+        if ammoRemoteDeleted then
+            Settings.InfAmmo_Enabled = true
+            infAmmoLabel:Set("Status: ✅ Activated")
+            Rayfield:Notify({Title = "🔫 Inf Ammo", Content = "ChangeAmmo remote deleted!", Duration = 3})
+        else
+            infAmmoLabel:Set("Status: ❌ Remote not found")
+            Rayfield:Notify({Title = "❌", Content = "Remote not found", Duration = 3})
+        end
+    end,
+})
+
+MainTab:CreateDivider()
+MainTab:CreateSection("💀 Auto Kill (Fast)")
+
+MainTab:CreateParagraph({
+    Title = "ℹ️ Information",
+    Content = "Kills all NPCs in workspace.NPCs.\nSkips: Phantom, Armory (immortal).\nYou must hold a weapon!"
+})
+
+MainTab:CreateToggle({
+    Name = "💀 Auto Kill",
+    CurrentValue = Settings.AutoKill_Enabled,
+    Flag = "AutoKill",
+    Callback = function(value)
+        Settings.AutoKill_Enabled = value
+        if value then
+            local w = getEquippedWeapon()
+            if not w then
+                Rayfield:Notify({Title = "⚠️", Content = "Equip a weapon first!", Duration = 3})
+            else
+                Rayfield:Notify({Title = "💀", Content = "Auto Kill ON — " .. w.Name, Duration = 2})
+            end
+        end
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "🔥 Burst (hits per tick)",
+    Range = {1, 50},
+    Increment = 1,
+    Suffix = " hits",
+    CurrentValue = Settings.AutoKill_BurstCount,
+    Flag = "BurstCount",
+    Callback = function(v) Settings.AutoKill_BurstCount = v end,
+})
+
+MainTab:CreateSlider({
+    Name = "⏱️ Delay between NPCs",
+    Range = {0, 0.5},
+    Increment = 0.01,
+    Suffix = " sec",
+    CurrentValue = Settings.AutoKill_Delay,
+    Flag = "KillDelay",
+    Callback = function(v) Settings.AutoKill_Delay = v end,
+})
+
+MainTab:CreateParagraph({
+    Title = "🛡️ Immortal NPCs (skipped)",
+    Content = "• Phantom\n• Armory\nThey will not be attacked."
+})
+
+local killStatsLabel = MainTab:CreateLabel("Kills: 0 | Weapon: None | Alive: 0")
+
+-- ============================================================
+-- TAB 2: NPC ESP
+-- ============================================================
+local NPCTab = Window:CreateTab("👤 NPC ESP", 4483362458)
+
+NPCTab:CreateSection("Entity Selection")
+
+local EntityDropdown = NPCTab:CreateDropdown({
+    Name = "📋 Entities",
+    Options = allNPCNames,
+    CurrentOption = {},
+    MultipleOptions = true,
+    Flag = "NPC_Sel",
+    Callback = function(value)
+        Settings.NPC_SelectedEntities = value
+        rebuildNPCESP()
+    end,
+})
+
+NPCTab:CreateButton({
+    Name = "✅ Select All",
+    Callback = function()
+        Settings.NPC_SelectedEntities = {}
+        for _, n in ipairs(allNPCNames) do table.insert(Settings.NPC_SelectedEntities, n) end
+        EntityDropdown:Set(Settings.NPC_SelectedEntities)
+        rebuildNPCESP()
+        Rayfield:Notify({Title = "✅", Content = #allNPCNames .. " NPCs selected", Duration = 2})
+    end,
+})
+
+NPCTab:CreateButton({
+    Name = "❌ Deselect All",
+    Callback = function()
+        Settings.NPC_SelectedEntities = {}
+        EntityDropdown:Set({})
+        removeAllNPCESP()
+    end,
+})
+
+NPCTab:CreateButton({
+    Name = "🔄 Refresh List",
+    Callback = function()
+        local old = Settings.NPC_SelectedEntities
+        removeAllNPCESP()
+        allNPCModels = {}
+        allNPCNames = {}
+        findNPCFolder()
+        if npcFolder then scanNPCFolder(npcFolder) end
+        table.sort(allNPCNames)
+        EntityDropdown:Refresh(allNPCNames, true)
+        Settings.NPC_SelectedEntities = old
+        EntityDropdown:Set(old)
+        rebuildNPCESP()
+        Rayfield:Notify({Title = "🔄", Content = #allNPCNames .. " NPCs found", Duration = 2})
+    end,
+})
+
+NPCTab:CreateDivider()
+NPCTab:CreateSection("Settings")
+
+NPCTab:CreateToggle({
+    Name = "🟢 Highlight",
+    CurrentValue = Settings.NPC_ESP_Enabled,
+    Flag = "NPC_HL",
+    Callback = function(v) Settings.NPC_ESP_Enabled = v end,
+})
+
+NPCTab:CreateToggle({
+    Name = "🏷️ NameTags",
+    CurrentValue = Settings.NPC_NameTags_Enabled,
+    Flag = "NPC_NT",
+    Callback = function(v) Settings.NPC_NameTags_Enabled = v end,
+})
+
+NPCTab:CreateColorPicker({
+    Name = "🎨 Color",
+    Color = Settings.NPC_ESPColor,
+    Flag = "NPC_Col",
+    Callback = function(v) Settings.NPC_ESPColor = v end,
+})
+
+NPCTab:CreateSlider({
+    Name = "📏 Max Distance",
+    Range = {50, 2000},
+    Increment = 50,
+    Suffix = " studs",
+    CurrentValue = Settings.NPC_MaxDistance,
+    Flag = "NPC_Dist",
+    Callback = function(v) Settings.NPC_MaxDistance = v end,
+})
+
+NPCTab:CreateSlider({
+    Name = "🔍 Fill Transparency",
+    Range = {0, 100},
+    Increment = 5,
+    Suffix = "%",
+    CurrentValue = Settings.NPC_FillTransparency * 100,
+    Flag = "NPC_Fill",
+    Callback = function(v) Settings.NPC_FillTransparency = v / 100 end,
+})
+
+NPCTab:CreateSlider({
+    Name = "📝 Text Size",
+    Range = {8, 24},
+    Increment = 1,
+    Suffix = "px",
+    CurrentValue = Settings.NPC_NameTagSize,
+    Flag = "NPC_TS",
+    Callback = function(v) Settings.NPC_NameTagSize = v end,
+})
+
+local npcInfoLabel = NPCTab:CreateLabel("NPCs: 0 | ESP: 0")
+
+-- ============================================================
+-- TAB 3: LOOT ESP
+-- ============================================================
+local LootTab = Window:CreateTab("📦 Loot ESP", 4483362458)
+
+LootTab:CreateSection("Rarity Selection")
+
+local RarityDropdown = LootTab:CreateDropdown({
+    Name = "⭐ Rarity",
+    Options = {"1 - Common", "2 - Uncommon", "3 - Rare", "4 - Epic", "5 - Legendary"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Flag = "Loot_Rar",
+    Callback = function(value)
+        Settings.Loot_SelectedRarities = {}
+        for _, v in ipairs(value) do
+            local num = tonumber(v:sub(1, 1))
+            if num then table.insert(Settings.Loot_SelectedRarities, num) end
+        end
+        rebuildLootESP()
+    end,
+})
+
+LootTab:CreateButton({
+    Name = "✅ All Rarities",
+    Callback = function()
+        Settings.Loot_SelectedRarities = {1, 2, 3, 4, 5}
+        RarityDropdown:Set({"1 - Common", "2 - Uncommon", "3 - Rare", "4 - Epic", "5 - Legendary"})
+        rebuildLootESP()
+    end,
+})
+
+LootTab:CreateButton({
+    Name = "⭐ Rarities 3-5",
+    Callback = function()
+        Settings.Loot_SelectedRarities = {3, 4, 5}
+        RarityDropdown:Set({"3 - Rare", "4 - Epic", "5 - Legendary"})
+        rebuildLootESP()
+    end,
+})
+
+LootTab:CreateButton({
+    Name = "❌ Deselect All",
+    Callback = function()
+        Settings.Loot_SelectedRarities = {}
+        RarityDropdown:Set({})
+        removeAllLootESP()
+    end,
+})
+
+LootTab:CreateDivider()
+LootTab:CreateSection("Settings")
+
+LootTab:CreateToggle({
+    Name = "🟢 Highlight",
+    CurrentValue = Settings.Loot_ESP_Enabled,
+    Flag = "Loot_HL",
+    Callback = function(v) Settings.Loot_ESP_Enabled = v end,
+})
+
+LootTab:CreateToggle({
+    Name = "🏷️ NameTags",
+    CurrentValue = Settings.Loot_NameTags_Enabled,
+    Flag = "Loot_NT",
+    Callback = function(v) Settings.Loot_NameTags_Enabled = v end,
+})
+
+LootTab:CreateSlider({
+    Name = "📏 Max Distance",
+    Range = {50, 2000},
+    Increment = 50,
+    Suffix = " studs",
+    CurrentValue = Settings.Loot_MaxDistance,
+    Flag = "Loot_Dist",
+    Callback = function(v) Settings.Loot_MaxDistance = v end,
+})
+
+LootTab:CreateSlider({
+    Name = "🔍 Fill Transparency",
+    Range = {0, 100},
+    Increment = 5,
+    Suffix = "%",
+    CurrentValue = Settings.Loot_FillTransparency * 100,
+    Flag = "Loot_Fill",
+    Callback = function(v) Settings.Loot_FillTransparency = v / 100 end,
+})
+
+LootTab:CreateSlider({
+    Name = "📝 Text Size",
+    Range = {8, 24},
+    Increment = 1,
+    Suffix = "px",
+    CurrentValue = Settings.Loot_NameTagSize,
+    Flag = "Loot_TS",
+    Callback = function(v) Settings.Loot_NameTagSize = v end,
+})
+
+local lootInfoLabel = LootTab:CreateLabel("Loot ESP: 0")
+
+-- ============================================================
+-- TAB 4: PROXIMITY
+-- ============================================================
+local ProxTab = Window:CreateTab("🔘 Proximity", 4483362458)
+
+ProxTab:CreateSection("Proximity Prompt Spammer")
+
+ProxTab:CreateParagraph({
+    Title = "ℹ️ How it works",
+    Content = "Automatically fires all ProximityPrompts in range.\nDoors, loot, NPC dialogs, etc."
+})
+
+ProxTab:CreateToggle({
+    Name = "⚡ Enable",
+    CurrentValue = Settings.Proximity_Enabled,
+    Flag = "Prox_On",
+    Callback = function(v) Settings.Proximity_Enabled = v end,
+})
+
+ProxTab:CreateSlider({
+    Name = "📏 Radius",
+    Range = {5, 100},
+    Increment = 5,
+    Suffix = " studs",
+    CurrentValue = Settings.Proximity_Radius,
+    Flag = "Prox_Rad",
+    Callback = function(v) Settings.Proximity_Radius = v end,
+})
+
+ProxTab:CreateSlider({
+    Name = "⏱️ Delay",
+    Range = {0.05, 1},
+    Increment = 0.05,
+    Suffix = " sec",
+    CurrentValue = Settings.Proximity_Delay,
+    Flag = "Prox_Del",
+    Callback = function(v) Settings.Proximity_Delay = v end,
+})
+
+local proxInfoLabel = ProxTab:CreateLabel("OFF | Fired: 0")
+
+-- ===== RENDER =====
+RunService.RenderStepped:Connect(updateESP)
+
+-- ===== LABEL UPDATER =====
+task.spawn(function()
+    while task.wait(0.3) do
+        pcall(function()
+            local w = getEquippedWeapon()
+            local wn = w and w.Name or "None"
+            local alive = #getAllAliveNPCs()
+            killStatsLabel:Set("Kills: " .. autoKillStats.kills .. " | Weapon: " .. wn .. " | Alive: " .. alive)
+
+            local nA = 0
+            for _ in pairs(npcESPObjects) do nA = nA + 1 end
+            npcInfoLabel:Set("NPCs: " .. #allNPCNames .. " | ESP: " .. nA)
+
+            local lA = 0
+            for _ in pairs(lootESPObjects) do lA = lA + 1 end
+            lootInfoLabel:Set("Loot ESP: " .. lA)
+
+            local ps = Settings.Proximity_Enabled and "ON" or "OFF"
+            proxInfoLabel:Set(ps .. " | Fired: " .. proximityStats.fired)
+        end)
+    end
+end)
+
+-- ===== NOTIFY =====
+task.spawn(function()
+    task.wait(2)
+    Rayfield:Notify({
+        Title = "🎯 ESP & Combat",
+        Content = "Successfully Loaded!\nFast Burst Auto Kill | ESP | Proximity",
+        Duration = 5,
+    })
+end)
+
+print("✅ ESP & Combat System loaded")
