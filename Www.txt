@@ -17,7 +17,7 @@ local Window = Rayfield:CreateWindow({
 local Tab = Window:CreateTab("Ban Player")
 
 local SelectedPlayer = nil
-local BanDuration = 24
+local BanDuration = "24"
 local BanReason = "No reason"
 
 local function GetPlayerNames()
@@ -28,43 +28,118 @@ local function GetPlayerNames()
         end
     end
     if #names == 0 then
-        table.insert(names, "No players")
+        return {"No players available"}
     end
     return names
+end
+
+local function FindPlayerByName(name)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Name == name then
+            return plr
+        end
+    end
+    return nil
+end
+
+local function BanPlayer(targetPlayer, duration, reason)
+    if not targetPlayer or not targetPlayer.Parent then
+        Rayfield:Notify({
+            Title = "❌ Error",
+            Content = "No player selected or player left!",
+            Duration = 3
+        })
+        return false
+    end
+
+    -- UserID и Duration передаём как СТРОКИ
+    local args = {
+        [1] = "BanPlayer",
+        [2] = tostring(targetPlayer.UserId),
+        [3] = tostring(duration),
+        [4] = tostring(reason)
+    }
+
+    local success, err = pcall(function()
+        game:GetService("ReplicatedStorage").Admin:FireServer(
+            args[1],
+            args[2],
+            args[3],
+            args[4]
+        )
+    end)
+
+    if success then
+        print("✅ BAN SENT")
+        print("Action:", args[1])
+        print("UserID:", args[2])
+        print("Duration:", args[3])
+        print("Reason:", args[4])
+        
+        Rayfield:Notify({
+            Title = "✅ BANNED",
+            Content = string.format("%s\nID: %s\nDuration: %sh\nReason: %s",
+                targetPlayer.Name,
+                args[2],
+                args[3],
+                args[4]
+            ),
+            Duration = 6,
+            Image = 4483362458
+        })
+        return true
+    else
+        print("❌ BAN FAILED:", err)
+        Rayfield:Notify({
+            Title = "❌ Ban Failed",
+            Content = tostring(err),
+            Duration = 5
+        })
+        return false
+    end
 end
 
 -- Dropdown
 local PlayerDropdown = Tab:CreateDropdown({
     Name = "Select Player",
     Options = GetPlayerNames(),
-    CurrentOption = {"No players"},
+    CurrentOption = GetPlayerNames()[1] or "No players available",
     MultipleOptions = false,
     Flag = "PlayerSelect",
-    Callback = function(Option)
-        local name = Option
-        if name and name ~= "No players" then
-            local plr = Players:FindFirstChild(name)
+    Callback = function(option)
+        local selectedName = nil
+        if type(option) == "table" then
+            selectedName = option[1]
+        elseif type(option) == "string" then
+            selectedName = option
+        end
+
+        if selectedName and selectedName ~= "No players available" then
+            local plr = FindPlayerByName(selectedName)
             if plr then
                 SelectedPlayer = plr
+                print("Selected:", plr.Name, "| ID:", plr.UserId)
                 Rayfield:Notify({
-                    Title = "Selected",
-                    Content = plr.Name .. " | ID: " .. plr.UserId,
+                    Title = "✅ Selected",
+                    Content = plr.Name .. "\nID: " .. tostring(plr.UserId),
                     Duration = 3
                 })
             end
+        else
+            SelectedPlayer = nil
         end
     end
 })
 
--- Refresh button
 Tab:CreateButton({
-    Name = "Refresh Player List",
+    Name = "🔄 Refresh List",
     Callback = function()
+        SelectedPlayer = nil
         local newList = GetPlayerNames()
-        PlayerDropdown:Refresh(newList)
+        PlayerDropdown:Refresh(newList, true)
         Rayfield:Notify({
             Title = "Refreshed",
-            Content = "Player list updated",
+            Content = "Found " .. #newList .. " player(s)",
             Duration = 2
         })
     end
@@ -72,18 +147,16 @@ Tab:CreateButton({
 
 Tab:CreateSection("Ban Settings")
 
--- Duration input
 Tab:CreateInput({
-    Name = "Ban Duration (hours)",
+    Name = "Duration (hours)",
     PlaceholderText = "24",
     RemoveTextAfterFocusLost = false,
     Callback = function(Text)
-        local num = tonumber(Text)
-        if num and num > 0 then
-            BanDuration = num
+        if Text and Text ~= "" and tonumber(Text) then
+            BanDuration = Text -- Сохраняем как строку
             Rayfield:Notify({
                 Title = "Duration Set",
-                Content = num .. " hours",
+                Content = Text .. " hours",
                 Duration = 2
             })
         else
@@ -96,161 +169,159 @@ Tab:CreateInput({
     end
 })
 
--- Reason input
 Tab:CreateInput({
     Name = "Ban Reason",
-    PlaceholderText = "Enter reason here",
+    PlaceholderText = "Enter reason",
     RemoveTextAfterFocusLost = false,
     Callback = function(Text)
         if Text and Text ~= "" then
             BanReason = Text
             Rayfield:Notify({
                 Title = "Reason Set",
-                Content = BanReason,
+                Content = Text,
                 Duration = 2
             })
         end
     end
 })
 
-Tab:CreateSection("Execute Ban")
+Tab:CreateSection("Execute")
 
--- BAN BUTTON
 Tab:CreateButton({
     Name = "🔨 BAN PLAYER",
     Callback = function()
-        if SelectedPlayer == nil then
-            Rayfield:Notify({
-                Title = "Error",
-                Content = "Select a player first!",
-                Duration = 3
-            })
-            return
-        end
+        BanPlayer(SelectedPlayer, BanDuration, BanReason)
+    end
+})
 
-        local success, err = pcall(function()
-            local AdminRemote = ReplicatedStorage:WaitForChild("Admin", 5)
-            if AdminRemote then
-                AdminRemote:FireServer("BanPlayer", SelectedPlayer.UserId, BanDuration, BanReason)
-            else
-                error("Admin remote not found")
+Tab:CreateSection("Quick Ban")
+
+local function QuickBan(hours, reason)
+    BanPlayer(SelectedPlayer, tostring(hours), reason)
+end
+
+Tab:CreateButton({
+    Name = "⚡ 1h - Spam",
+    Callback = function() QuickBan("1", "Spamming") end
+})
+
+Tab:CreateButton({
+    Name = "⚡ 6h - Toxicity",
+    Callback = function() QuickBan("6", "Toxic behavior") end
+})
+
+Tab:CreateButton({
+    Name = "⚡ 24h - Exploiting",
+    Callback = function() QuickBan("24", "Exploiting") end
+})
+
+Tab:CreateButton({
+    Name = "⚡ 168h - 7 Days",
+    Callback = function() QuickBan("168", "Severe violation") end
+})
+
+Tab:CreateButton({
+    Name = "⚡ 720h - 30 Days",
+    Callback = function() QuickBan("720", "Permanent-like ban") end
+})
+
+Tab:CreateSection("Duration Presets")
+
+local function SetDuration(hours)
+    BanDuration = tostring(hours)
+    Rayfield:Notify({
+        Title = "Duration Set",
+        Content = hours .. " hours",
+        Duration = 2
+    })
+end
+
+Tab:CreateButton({Name = "⏱️ 1h",   Callback = function() SetDuration("1") end})
+Tab:CreateButton({Name = "⏱️ 6h",   Callback = function() SetDuration("6") end})
+Tab:CreateButton({Name = "⏱️ 12h",  Callback = function() SetDuration("12") end})
+Tab:CreateButton({Name = "⏱️ 24h",  Callback = function() SetDuration("24") end})
+Tab:CreateButton({Name = "⏱️ 72h",  Callback = function() SetDuration("72") end})
+Tab:CreateButton({Name = "⏱️ 168h", Callback = function() SetDuration("168") end})
+Tab:CreateButton({Name = "⏱️ 720h", Callback = function() SetDuration("720") end})
+
+-- Players Tab
+local InfoTab = Window:CreateTab("Players")
+
+InfoTab:CreateButton({
+    Name = "📋 List All Players",
+    Callback = function()
+        local list = Players:GetPlayers()
+        print("=== PLAYERS ===")
+        for i, plr in ipairs(list) do
+            if plr ~= LocalPlayer then
+                local info = i .. ". " .. plr.Name .. " | ID: " .. tostring(plr.UserId)
+                print(info)
+                Rayfield:Notify({
+                    Title = plr.Name,
+                    Content = "ID: " .. tostring(plr.UserId),
+                    Duration = 3
+                })
+                task.wait(0.4)
             end
-        end)
-
-        if success then
-            Rayfield:Notify({
-                Title = "✅ Banned!",
-                Content = SelectedPlayer.Name .. " for " .. BanDuration .. "h - " .. BanReason,
-                Duration = 5
-            })
-        else
-            Rayfield:Notify({
-                Title = "❌ Error",
-                Content = tostring(err),
-                Duration = 5
-            })
         end
-    end
-})
-
-Tab:CreateSection("Quick Duration Presets")
-
--- Quick presets
-Tab:CreateButton({
-    Name = "⏱️ 1 Hour",
-    Callback = function()
-        BanDuration = 1
-        Rayfield:Notify({Title = "Duration", Content = "Set to 1 hour", Duration = 2})
-    end
-})
-
-Tab:CreateButton({
-    Name = "⏱️ 24 Hours",
-    Callback = function()
-        BanDuration = 24
-        Rayfield:Notify({Title = "Duration", Content = "Set to 24 hours", Duration = 2})
-    end
-})
-
-Tab:CreateButton({
-    Name = "⏱️ 7 Days (168h)",
-    Callback = function()
-        BanDuration = 168
-        Rayfield:Notify({Title = "Duration", Content = "Set to 7 days", Duration = 2})
-    end
-})
-
-Tab:CreateButton({
-    Name = "⏱️ 30 Days (720h)",
-    Callback = function()
-        BanDuration = 720
-        Rayfield:Notify({Title = "Duration", Content = "Set to 30 days", Duration = 2})
-    end
-})
-
-Tab:CreateButton({
-    Name = "⏱️ Permanent (999999h)",
-    Callback = function()
-        BanDuration = 999999
-        Rayfield:Notify({Title = "Duration", Content = "Set to PERMANENT", Duration = 2})
-    end
-})
-
--- Info tab
-local InfoTab = Window:CreateTab("Player Info")
-
-InfoTab:CreateButton({
-    Name = "📋 Show All Players",
-    Callback = function()
-        local count = 0
-        for _, plr in ipairs(Players:GetPlayers()) do
-            count = count + 1
-            print(plr.Name .. " | " .. plr.UserId)
-            Rayfield:Notify({
-                Title = "Player #" .. count,
-                Content = plr.Name .. " - ID: " .. plr.UserId,
-                Duration = 3
-            })
-            task.wait(0.5)
-        end
+        print("===============")
     end
 })
 
 InfoTab:CreateButton({
-    Name = "ℹ️ Selected Player Info",
+    Name = "🎯 Selected Player Info",
     Callback = function()
-        if SelectedPlayer then
+        if SelectedPlayer and SelectedPlayer.Parent then
+            local info = string.format(
+                "Name: %s\nUserID: %s\nDisplay: %s\nAge: %d days",
+                SelectedPlayer.Name,
+                tostring(SelectedPlayer.UserId),
+                SelectedPlayer.DisplayName,
+                SelectedPlayer.AccountAge
+            )
+            print(info)
             Rayfield:Notify({
-                Title = "Current Selection",
-                Content = SelectedPlayer.Name .. "\nID: " .. SelectedPlayer.UserId .. "\nAccount Age: " .. SelectedPlayer.AccountAge .. " days",
+                Title = SelectedPlayer.Name,
+                Content = info,
                 Duration = 5
             })
         else
             Rayfield:Notify({
                 Title = "No Selection",
-                Content = "Please select a player first",
+                Content = "Select a player first",
                 Duration = 3
             })
         end
     end
 })
 
--- Auto refresh player list
-Players.PlayerAdded:Connect(function()
-    task.wait(1)
+-- Auto refresh
+Players.PlayerAdded:Connect(function(player)
+    task.wait(0.5)
     pcall(function()
-        PlayerDropdown:Refresh(GetPlayerNames())
+        PlayerDropdown:Refresh(GetPlayerNames(), true)
+        Rayfield:Notify({
+            Title = "Joined",
+            Content = player.Name,
+            Duration = 2
+        })
     end)
 end)
 
-Players.PlayerRemoving:Connect(function()
-    task.wait(1)
+Players.PlayerRemoving:Connect(function(player)
+    task.wait(0.5)
     pcall(function()
-        PlayerDropdown:Refresh(GetPlayerNames())
-        if SelectedPlayer and not SelectedPlayer.Parent then
+        if SelectedPlayer == player then
             SelectedPlayer = nil
+            Rayfield:Notify({
+                Title = "Player Left",
+                Content = player.Name .. " left - selection cleared",
+                Duration = 3
+            })
         end
+        PlayerDropdown:Refresh(GetPlayerNames(), true)
     end)
 end)
 
-Rayfield:LoadConfiguration()
+print("=== Admin Ban Panel Loaded ===")
+print("Format: FireServer('BanPlayer', UserID(string), Duration(string), Reason(string))")
