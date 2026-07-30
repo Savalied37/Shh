@@ -1,453 +1,256 @@
--- Script Path: game:GetService("ReplicatedStorage").AssetsUI:GetChildren()[21]
--- Took 0.02s to decompile.
--- Executor: Delta (1.1.731.944)
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
-local v_u_1 = Color3.fromRGB(255, 255, 0)
-local v_u_2 = Color3.fromRGB(255, 255, 255)
-local v6 = {
-    ["Init"] = function(p3) -- name: Init
-        local v4 = game.Players.LocalPlayer:GetRankInGroup(5088137)
-        game.Players.LocalPlayer:GetRoleInGroup(5088137)
-        if v4 < 199 then
-            p3:Disconnect()
-        else
-            p3.gui = p3.GetAsset("AdminPanel")
-            for _, v5 in pairs(p3.gui:GetChildren()) do
-                if p3["config" .. v5.Name] then
-                    p3["config" .. v5.Name](p3, v5)
-                end
-            end
-            p3:Show()
-        end
-    end,
-    ["Clean"] = function(_) -- name: Clean end
-}
-local v_u_7 = game:GetService("Players")
-local v_u_8 = game.Players.GetNameFromUserIdAsync
-local v_u_9 = game.Players.GetUserIdFromNameAsync
-function v6.configMainFrame(p_u_10, p_u_11) -- name: configMainFrame
-    p_u_10.showingPage = "Default"
-    local v_u_12 = p_u_11:WaitForChild("Pages")
-    local v13 = TweenInfo.new(0.2)
-    local v_u_14 = p_u_10.L.Tween:Create(p_u_11, v13, {
-        ["Position"] = UDim2.fromScale(0.5, 0.5)
-    })
-    function p_u_10.showAdminPanel(_)
-        -- upvalues: (copy) p_u_10, (copy) p_u_11, (copy) v_u_14
-        p_u_10.g.CurrentlyShowing = "AdminPanel"
-        p_u_10.CallGui("backgroundShow")
-        p_u_11.Visible = true
-        v_u_14:Play()
-    end
-    function p_u_10.hideAdminPanel(_)
-        -- upvalues: (copy) p_u_10, (copy) p_u_11
-        p_u_10.g.CurrentlyShowing = ""
-        p_u_10.CallGui("backgroundHide")
-        p_u_11.Visible = false
-        p_u_11.Position = UDim2.fromScale(0.5, 0.4)
-    end
-    function p_u_10.showPage(p15, ...)
-        -- upvalues: (copy) v_u_12, (copy) p_u_10
-        v_u_12[p_u_10.showingPage].Visible = false
-        p_u_10.showingPage = p15
-        if p_u_10["showPage" .. p15] then
-            p_u_10["showPage" .. p15](p_u_10, ...)
-        end
-        v_u_12[p15].Visible = true
-    end
-    for _, v16 in pairs(v_u_12:GetChildren()) do
-        if p_u_10["setupPage" .. v16.Name] then
-            coroutine.wrap(p_u_10["setupPage" .. v16.Name])(p_u_10, v16)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local Window = Rayfield:CreateWindow({
+    Name = "Admin Ban Panel",
+    LoadingTitle = "Ban System",
+    LoadingSubtitle = "Loading...",
+    ConfigurationSaving = {
+        Enabled = false
+    },
+    KeySystem = false
+})
+
+local Tab = Window:CreateTab("Ban Player")
+
+local SelectedPlayer = nil
+local BanDuration = 24
+local BanReason = "No reason"
+
+local function GetPlayerNames()
+    local names = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            table.insert(names, plr.Name)
         end
     end
+    if #names == 0 then
+        table.insert(names, "No players")
+    end
+    return names
 end
-function v6.configItemList(p_u_17, p18) -- name: configItemList
-    -- upvalues: (copy) v_u_1, (copy) v_u_2
-    local v_u_19 = p18:WaitForChild("Filter")
-    local v20 = p18.Filter:WaitForChild("FilterDefault")
-    local v_u_21 = p18:WaitForChild("SearchName")
-    local v22 = p18:WaitForChild("List"):WaitForChild("Scroll")
-    p_u_17.FilterType = "All"
-    local v_u_23 = { "All", "Name" }
-    local v_u_24 = {}
-    for _, v25 in pairs(p_u_17.L.Main.Items) do
-        if table.find(v_u_23, v25.FilterType) == nil then
-            local v26 = v25.FilterType
-            table.insert(v_u_23, v26)
+
+-- Dropdown
+local PlayerDropdown = Tab:CreateDropdown({
+    Name = "Select Player",
+    Options = GetPlayerNames(),
+    CurrentOption = {"No players"},
+    MultipleOptions = false,
+    Flag = "PlayerSelect",
+    Callback = function(Option)
+        local name = Option
+        if name and name ~= "No players" then
+            local plr = Players:FindFirstChild(name)
+            if plr then
+                SelectedPlayer = plr
+                Rayfield:Notify({
+                    Title = "Selected",
+                    Content = plr.Name .. " | ID: " .. plr.UserId,
+                    Duration = 3
+                })
+            end
         end
     end
-    local v_u_27 = v_u_19:WaitForChild("UIListLayout")
-    local function v_u_34() -- name: FilterItems
-        -- upvalues: (copy) v_u_21, (copy) v_u_27, (copy) p_u_17, (copy) v_u_19, (copy) v_u_24
-        local v28 = string.upper(v_u_21.Text)
-        v_u_27.SortOrder = p_u_17.FilterType == "Name" and Enum.SortOrder.Name or Enum.SortOrder.LayoutOrder
-        for v29, v30 in pairs(p_u_17.L.Main.Items) do
-            local v31 = v_u_19[v29]
-            local v32, _ = string.find(string.upper(v29), v28)
-            v31.Visible = (v28 ~= "" and v32 ~= nil or (p_u_17.FilterType == "Name" or p_u_17.FilterType == "All")) and true or v30.FilterType == p_u_17.FilterType
-            local v33
-            if v28 == "" then
-                v33 = v_u_24[v31]
-            else
-                v33 = (v32 == nil or not v32) and 999 or v32
-            end
-            v31.LayoutOrder = v33
-        end
-    end
-    p_u_17.DF.FilterName = v_u_21:GetPropertyChangedSignal("Text"):Connect(v_u_34)
-    for _, v_u_35 in pairs(v_u_23) do
-        local v36 = v20:Clone()
-        v36.Title.Text = v_u_35
-        v36.Title.Shadow.Text = v_u_35
-        v36.Name = v_u_35
-        v36.Title.TextColor3 = p_u_17.FilterType == v_u_35 and v_u_1 or v_u_2
-        v36.Parent = v_u_19
-        v36.Visible = true
-        local v37 = {
-            ["TextColor3"] = v_u_1
-        }
-        local v_u_38 = p_u_17.L.Tween:Create(v36.Title, TweenInfo.new(0.2), v37)
-        local v39 = {
-            ["TextColor3"] = v_u_2
-        }
-        local v_u_40 = p_u_17.L.Tween:Create(v36.Title, TweenInfo.new(0.2), v39)
-        local v42 = {
-            ["Activated"] = function() -- name: Activated
-                -- upvalues: (copy) p_u_17, (copy) v_u_35, (copy) v_u_23, (copy) v_u_19, (ref) v_u_1, (ref) v_u_2, (copy) v_u_34
-                p_u_17.L.Sound.Play("OnClick")
-                p_u_17.FilterType = v_u_35
-                for _, v41 in pairs(v_u_23) do
-                    v_u_19[v41].Title.TextColor3 = p_u_17.FilterType == v41 and v_u_1 or v_u_2
-                end
-                v_u_34()
-            end,
-            ["MouseEnter"] = function() -- name: MouseEnter
-                -- upvalues: (copy) p_u_17, (copy) v_u_38
-                p_u_17.L.Sound.Play("MouseHover")
-                v_u_38:Play()
-            end,
-            ["MouseLeave"] = function() -- name: MouseLeave
-                -- upvalues: (copy) p_u_17, (copy) v_u_35, (copy) v_u_40
-                if p_u_17.FilterType ~= v_u_35 then
-                    v_u_40:Play()
-                end
-            end
-        }
-        p_u_17.UI:GuiInteraction(v36, v42)
-    end
-    local v_u_43 = nil
-    local v_u_44 = nil
-    local v45 = 0
-    for v_u_46, v_u_47 in pairs(p_u_17.L.Main.Items) do
-        local v_u_48 = p_u_17.GetAsset("ItemDisplayer")
-        v_u_48.Name = v_u_46
-        v_u_48.LayoutOrder = v45
-        v_u_48.Parent = v22
-        v_u_24[v_u_48] = v45
-        v45 = v45 + 1
-        p_u_17.UI:ConfigItemVPF(v_u_48.ViewportFrame, v_u_46)
-        local v49 = {
-            ["Color"] = v_u_1
-        }
-        local v_u_50 = p_u_17.L.Tween:Create(v_u_48.UIStroke, TweenInfo.new(0.2), v49)
-        local v51 = {
-            ["Color"] = v_u_2
-        }
-        local v_u_52 = p_u_17.L.Tween:Create(v_u_48.UIStroke, TweenInfo.new(0.2), v51)
-        p_u_17.UI:GuiInteraction(v_u_48, {
-            ["Activated"] = function() -- name: Activated
-                -- upvalues: (copy) p_u_17, (copy) v_u_47, (copy) v_u_46
-                p_u_17.L.Sound.Play("OnClick")
-                if p_u_17.ReturnItemCallback then
-                    if v_u_47.Type == "Stack" then
-                        p_u_17.ReturnItemCallback(v_u_46, p_u_17.CallGui("GetAmount", v_u_47.MaxCapacity or 10), string.format("Max amount (%i)", v_u_47.MaxCapacity or 10))
-                        return
-                    end
-                    p_u_17.ReturnItemCallback(v_u_46)
-                end
-            end,
-            ["MouseEnter"] = function() -- name: MouseEnter
-                -- upvalues: (ref) v_u_43, (copy) v_u_48, (copy) p_u_17, (copy) v_u_46, (copy) v_u_50
-                v_u_43 = v_u_48
-                p_u_17.CallGui("ChangeTitle", v_u_46)
-                p_u_17.L.Sound.Play("MouseHover")
-                v_u_50:Play()
-            end,
-            ["MouseLeave"] = function() -- name: MouseLeave
-                -- upvalues: (ref) v_u_43, (copy) v_u_48, (copy) p_u_17, (ref) v_u_44, (copy) v_u_46, (copy) v_u_52
-                if v_u_43 == v_u_48 then
-                    p_u_17.CallGui("ChangeTitle")
-                end
-                if v_u_44 == nil or v_u_44 ~= v_u_46 then
-                    v_u_52:Play()
-                end
-            end
+})
+
+-- Refresh button
+Tab:CreateButton({
+    Name = "Refresh Player List",
+    Callback = function()
+        local newList = GetPlayerNames()
+        PlayerDropdown:Refresh(newList)
+        Rayfield:Notify({
+            Title = "Refreshed",
+            Content = "Player list updated",
+            Duration = 2
         })
     end
-    function p_u_17.GetAdminItem(p_u_53)
-        -- upvalues: (copy) p_u_17, (ref) v_u_44, (ref) v_u_43, (copy) v_u_24, (ref) v_u_2, (copy) v_u_23, (copy) v_u_19
-        local v_u_54 = p_u_17.g.CurrentlyShowing
-        function p_u_17.ReturnItemCallback(...)
-            -- upvalues: (ref) v_u_44, (ref) v_u_43, (ref) p_u_17, (copy) v_u_54, (ref) p_u_53
-            v_u_44 = nil
-            v_u_43 = nil
-            p_u_17.CallGui("ChangeTitle")
-            local v55 = p_u_17.gui.MainFrame
-            local v56 = p_u_17.gui.ItemList
-            v55.Visible = true
-            v56.Visible = false
-            p_u_17.g.CurrentlyShowing = v_u_54
-            p_u_53(...)
-            local v57 = p_u_17
-            p_u_53 = nil
-            v57.ReturnItemCallback = nil
-        end
-        for v58, _ in pairs(v_u_24) do
-            v58.Title.TextColor3 = v_u_2
-        end
-        for _, v59 in pairs(v_u_23) do
-            v_u_19[v59].Title.TextColor3 = v_u_2
-        end
-        local v60 = p_u_17.gui.MainFrame
-        local v61 = p_u_17.gui.ItemList
-        v60.Visible = false
-        v61.Visible = true
-        p_u_17.g.CurrentlyShowing = "ItemAdminDisplayer"
-    end
-end
-function v6.setupPageDefault(p_u_62, p63) -- name: setupPageDefault
-    -- upvalues: (copy) v_u_7, (copy) v_u_8, (copy) v_u_9
-    local v64 = p63:WaitForChild("PagesFrame"):WaitForChild("Buttons")
-    local v_u_65 = p63:WaitForChild("PlayerFrame")
-    local v66 = next
-    local v67, v68 = v64:GetChildren()
-    for _, v_u_69 in v66, v67, v68 do
-        if v_u_69.ClassName == "ImageButton" then
-            p_u_62.UI:GuiInteraction(v_u_69, {
-                ["Activated"] = nil,
-                ["DefaultHoverEffect"] = true,
-                ["Activated"] = function() -- name: Activated
-                    -- upvalues: (copy) p_u_62, (copy) v_u_69
-                    p_u_62.L.Sound.Play("OnClick")
-                    p_u_62.showPage(v_u_69.Name)
-                end
+})
+
+Tab:CreateSection("Ban Settings")
+
+-- Duration input
+Tab:CreateInput({
+    Name = "Ban Duration (hours)",
+    PlaceholderText = "24",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        local num = tonumber(Text)
+        if num and num > 0 then
+            BanDuration = num
+            Rayfield:Notify({
+                Title = "Duration Set",
+                Content = num .. " hours",
+                Duration = 2
+            })
+        else
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Enter a valid number",
+                Duration = 2
             })
         end
     end
-    p_u_62.PlayerDisconnect = {}
-    local v_u_70 = v_u_65:WaitForChild("Display")
-    local function v87(p_u_71) -- name: PlayerAdded
-        -- upvalues: (copy) p_u_62, (copy) v_u_70, (ref) v_u_7, (copy) v_u_65
-        p_u_62.PlayerDisconnect[p_u_71] = {}
-        local v72 = v_u_70:Clone()
-        v72.UserImage.Image = string.format("rbxthumb://type=AvatarBust&id=%i&w=420&h=420", p_u_71.UserId)
-        v72.Name = p_u_71.UserId
-        local v73 = nil
-        while true do
-            local v74, v75 = pcall(function()
-                -- upvalues: (copy) p_u_71
-                return p_u_71:GetRoleInGroup(5088137)
-            end)
-            if v74 then
-                v73 = v75
-                break
-            end
-            task.wait(0.1)
-            if v73 and p_u_71:FindFirstChild("GameData") or not p_u_71:IsDescendantOf(v_u_7) then
-                break
-            end
-        end
-        if p_u_71:IsDescendantOf(v_u_7) then
-            v72.UserRank.Text = string.format("Rank: %s", v73)
-            v72.UserRank.Shadow.Text = v72.UserRank.Text
-            v72.UserName.Text = p_u_71.Name
-            v72.UserName.Shadow.Text = p_u_71.Name
-            local v76 = p_u_71:WaitForChild("GameData")
-            local v77 = p_u_71:WaitForChild("Gamepass")
-            local v78 = p_u_71:WaitForChild("Inventory")
-            local v79 = p_u_71:WaitForChild("Vault")
-            local v_u_80 = v72:WaitForChild("InvSpace")
-            local function v81() -- name: UpdateInv
-                -- upvalues: (copy) v_u_80, (ref) p_u_62, (copy) p_u_71
-                v_u_80.Text = string.format("Inv: %i/%i", p_u_62.Invoke("Storage", "GetStorageLenght", p_u_71, "Inventory"))
-                v_u_80.Shadow.Text = v_u_80.Text
-            end
-            v_u_80.Text = string.format("Inv: %i/%i", p_u_62.Invoke("Storage", "GetStorageLenght", p_u_71, "Inventory"))
-            v_u_80.Shadow.Text = v_u_80.Text
-            p_u_62.PlayerDisconnect[p_u_71].InvAdded = v78.ChildAdded:Connect(v81)
-            p_u_62.PlayerDisconnect[p_u_71].InvRemoved = v78.ChildRemoved:Connect(v81)
-            local v_u_82 = v77:WaitForChild("InventorySpace")
-            if v_u_82.Value == true then
-                v_u_80.Text = string.format("Inv: %i/%i", p_u_62.Invoke("Storage", "GetStorageLenght", p_u_71, "Inventory"))
-                v_u_80.Shadow.Text = v_u_80.Text
-            else
-                p_u_62.PlayerDisconnect[p_u_71].InvUnlocked = v_u_82:GetPropertyChangedSignal("Value"):Connect(function()
-                    -- upvalues: (copy) v_u_82, (copy) v_u_80, (ref) p_u_62, (copy) p_u_71
-                    if v_u_82.Value ~= false then
-                        v_u_80.Text = string.format("Inv: %i/%i", p_u_62.Invoke("Storage", "GetStorageLenght", p_u_71, "Inventory"))
-                        v_u_80.Shadow.Text = v_u_80.Text
-                        p_u_62.PlayerDisconnect[p_u_71].InvUnlocked:Disconnect()
-                    end
-                end)
-            end
-            local v_u_83 = v72:WaitForChild("VaultSpace")
-            local function v84() -- name: UpdateVault
-                -- upvalues: (copy) v_u_83, (ref) p_u_62, (copy) p_u_71
-                v_u_83.Text = string.format("Vault: %i/%i", p_u_62.Invoke("Storage", "GetStorageLenght", p_u_71, "Vault"))
-                v_u_83.Shadow.Text = v_u_83.Text
-            end
-            v_u_83.Text = string.format("Vault: %i/%i", p_u_62.Invoke("Storage", "GetStorageLenght", p_u_71, "Vault"))
-            v_u_83.Shadow.Text = v_u_83.Text
-            p_u_62.PlayerDisconnect[p_u_71].VaultAdded = v79.ChildAdded:Connect(v84)
-            p_u_62.PlayerDisconnect[p_u_71].VaultRemoved = v79.ChildRemoved:Connect(v84)
-            local v85 = v76:WaitForChild("ExtraVaultSpace")
-            p_u_62.PlayerDisconnect[p_u_71].VaultSpace = v85:GetPropertyChangedSignal("Value"):Connect(v84)
-            local v86 = {
-                ["Activated"] = nil,
-                ["DefaultHoverEffect"] = true,
-                ["Activated"] = function() -- name: Activated
-                    -- upvalues: (ref) p_u_62, (copy) p_u_71
-                    p_u_62.L.Sound.Play("OnClick")
-                    p_u_62.ShowingUser = p_u_71
-                    p_u_62.showPage("Profile", p_u_71.UserId)
-                end
-            }
-            p_u_62.PlayerDisconnect[p_u_71].UIinteraction = p_u_62.UI:GuiInteraction(v72, v86)
-            v72.Parent = v_u_65
-            v72.Visible = true
-        else
-            p_u_62.PlayerDisconnect[p_u_71] = nil
-        end
-    end
-    local v88 = next
-    local v89, v90 = game.Players:GetPlayers()
-    for _, v91 in v88, v89, v90 do
-        coroutine.wrap(v87)(v91)
-    end
-    p_u_62.DF.PlrAdded = game.Players.PlayerAdded:Connect(v87)
-    p_u_62.DF.PlrRemoved = game.Players.PlayerRemoving:Connect(function(p92)
-        -- upvalues: (copy) v_u_65, (copy) p_u_62
-        local v93 = v_u_65:FindFirstChild(p92.UserId)
-        for _, v94 in next, p_u_62.PlayerDisconnect[p92] or {} do
-            v94:Disconnect()
-        end
-        if v93 then
-            v93:Destroy()
-            if p_u_62.ShowingUser == p92 then
-                p_u_62.showPage("Default")
-            end
-        end
-    end)
-    local v95 = p63:WaitForChild("SearchID")
-    local v_u_96 = v95:WaitForChild("ID")
-    local v97 = v95:WaitForChild("Find")
-    local v_u_98 = v95:WaitForChild("Result")
-    local v_u_99 = 0
-    local v_u_100 = {
-        [false] = Color3.fromRGB(255, 0, 0),
-        [true] = Color3.fromRGB(85, 255, 0),
-        ["default"] = Color3.fromRGB(255, 255, 255)
-    }
-    local function v109() -- name: CheckProfile
-        -- upvalues: (copy) v_u_96, (ref) v_u_99, (copy) v_u_98, (ref) v_u_8, (ref) v_u_7, (ref) v_u_9, (copy) v_u_100
-        if v_u_96.Text == "" then
-            return
-        else
-            local v_u_101 = tick()
-            v_u_99 = v_u_101
-            coroutine.wrap(function()
-                -- upvalues: (ref) v_u_99, (copy) v_u_101, (ref) v_u_98
-                local v102 = 0
-                while v_u_99 == v_u_101 do
-                    if v_u_99 ~= v_u_101 then
-                        return
-                    end
-                    local v103 = (v102 + 1) % 4
-                    v102 = math.max(v103, 1)
-                    v_u_98.Text = string.rep(".", v102)
-                    v_u_98.Shadow.Text = v_u_98.Text
-                    task.wait(0.3)
-                end
-            end)()
-            local v108, _ = pcall(function()
-                -- upvalues: (ref) v_u_96, (ref) v_u_8, (ref) v_u_7, (ref) v_u_9
-                local v104 = v_u_96.Text
-                if not tonumber(v104) then
-                    return v_u_9(v_u_7, v_u_96.Text)
-                end
-                local v105 = v_u_8
-                local v106 = v_u_7
-                local v107 = v_u_96.Text
-                return v105(v106, (tonumber(v107)))
-            end)
-            if v_u_99 == v_u_101 then
-                v_u_98.Text = v108 and "\226\156\147" or "X"
-                v_u_98.TextColor3 = v_u_100[v108]
-                v_u_98.Shadow.Text = v_u_98.Text
-                if not v108 then
-                    task.delay(0.1, function()
-                        -- upvalues: (ref) v_u_99, (copy) v_u_101, (ref) v_u_98, (ref) v_u_100
-                        if v_u_99 == v_u_101 then
-                            v_u_98.Text = ""
-                            v_u_98.TextColor3 = v_u_100.default
-                            v_u_99 = 0
-                        else
-                            v_u_99 = 0
-                        end
-                    end)
-                end
-            end
-        end
-    end
-    p_u_62.DF.SearchType = v_u_96:GetPropertyChangedSignal("Text"):Connect(v109)
-    local v116 = {
-        ["Activated"] = nil,
-        ["DefaultHoverEffect"] = true,
-        ["Activated"] = function() -- name: Activated
-            -- upvalues: (copy) v_u_96, (ref) v_u_8, (ref) v_u_7, (ref) v_u_9, (copy) v_u_98, (copy) p_u_62
-            local v110 = v_u_96.Text
-            local v_u_111 = tonumber(v110)
-            local v115, _ = pcall(function()
-                -- upvalues: (ref) v_u_111, (ref) v_u_8, (ref) v_u_7, (ref) v_u_96, (ref) v_u_9
-                if not v_u_111 then
-                    v_u_111 = v_u_9(v_u_7, v_u_96.Text)
-                    return true
-                end
-                local v112 = v_u_8
-                local v113 = v_u_7
-                local v114 = v_u_96.Text
-                return v112(v113, (tonumber(v114)))
-            end)
-            v_u_96.Text = ""
-            v_u_98.Text = ""
-            if v115 and v_u_111 then
-                p_u_62.showPage("Profile", v_u_111)
-            end
-        end
-    }
-    p_u_62.UI:GuiInteraction(v97, v116)
-    p_u_62.DF.AdminBind = p_u_62.Invoke("Bind", "newBind", "AdminPanel", nil, Enum.UserInputState.Begin, function(_)
-        -- upvalues: (copy) p_u_62
-        if p_u_62.g.CurrentlyShowing == "" then
-            p_u_62:showAdminPanel()
-            return
-        elseif p_u_62.g.CurrentlyShowing == "AdminPanel" and p_u_62.showingPage == "Default" then
-            p_u_62:hideAdminPanel()
-        elseif p_u_62.g.CurrentlyShowing == "AdminPanel" and p_u_62.showingPage ~= "Default" then
-            p_u_62.showPage("Default")
-        end
-    end)
-    function p_u_62.showPageDefault()
-        -- upvalues: (copy) v_u_98, (copy) v_u_100
-        v_u_98.Text = ""
-        v_u_98.TextColor3 = v_u_100.default
-    end
-end
-function v6.setupPageProfile(_, _) -- name: setupPageProfile end
-function v6.Show(p117) -- name: Show
-    p117.gui.Parent = p117.Plr.PlayerGui
-    p117.gui.Enabled = true
-end
-function v6.Hide(_) -- name: Hide end
-return v6
+})
 
+-- Reason input
+Tab:CreateInput({
+    Name = "Ban Reason",
+    PlaceholderText = "Enter reason here",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        if Text and Text ~= "" then
+            BanReason = Text
+            Rayfield:Notify({
+                Title = "Reason Set",
+                Content = BanReason,
+                Duration = 2
+            })
+        end
+    end
+})
+
+Tab:CreateSection("Execute Ban")
+
+-- BAN BUTTON
+Tab:CreateButton({
+    Name = "🔨 BAN PLAYER",
+    Callback = function()
+        if SelectedPlayer == nil then
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Select a player first!",
+                Duration = 3
+            })
+            return
+        end
+
+        local success, err = pcall(function()
+            local AdminRemote = ReplicatedStorage:WaitForChild("Admin", 5)
+            if AdminRemote then
+                AdminRemote:FireServer("BanPlayer", SelectedPlayer.UserId, BanDuration, BanReason)
+            else
+                error("Admin remote not found")
+            end
+        end)
+
+        if success then
+            Rayfield:Notify({
+                Title = "✅ Banned!",
+                Content = SelectedPlayer.Name .. " for " .. BanDuration .. "h - " .. BanReason,
+                Duration = 5
+            })
+        else
+            Rayfield:Notify({
+                Title = "❌ Error",
+                Content = tostring(err),
+                Duration = 5
+            })
+        end
+    end
+})
+
+Tab:CreateSection("Quick Duration Presets")
+
+-- Quick presets
+Tab:CreateButton({
+    Name = "⏱️ 1 Hour",
+    Callback = function()
+        BanDuration = 1
+        Rayfield:Notify({Title = "Duration", Content = "Set to 1 hour", Duration = 2})
+    end
+})
+
+Tab:CreateButton({
+    Name = "⏱️ 24 Hours",
+    Callback = function()
+        BanDuration = 24
+        Rayfield:Notify({Title = "Duration", Content = "Set to 24 hours", Duration = 2})
+    end
+})
+
+Tab:CreateButton({
+    Name = "⏱️ 7 Days (168h)",
+    Callback = function()
+        BanDuration = 168
+        Rayfield:Notify({Title = "Duration", Content = "Set to 7 days", Duration = 2})
+    end
+})
+
+Tab:CreateButton({
+    Name = "⏱️ 30 Days (720h)",
+    Callback = function()
+        BanDuration = 720
+        Rayfield:Notify({Title = "Duration", Content = "Set to 30 days", Duration = 2})
+    end
+})
+
+Tab:CreateButton({
+    Name = "⏱️ Permanent (999999h)",
+    Callback = function()
+        BanDuration = 999999
+        Rayfield:Notify({Title = "Duration", Content = "Set to PERMANENT", Duration = 2})
+    end
+})
+
+-- Info tab
+local InfoTab = Window:CreateTab("Player Info")
+
+InfoTab:CreateButton({
+    Name = "📋 Show All Players",
+    Callback = function()
+        local count = 0
+        for _, plr in ipairs(Players:GetPlayers()) do
+            count = count + 1
+            print(plr.Name .. " | " .. plr.UserId)
+            Rayfield:Notify({
+                Title = "Player #" .. count,
+                Content = plr.Name .. " - ID: " .. plr.UserId,
+                Duration = 3
+            })
+            task.wait(0.5)
+        end
+    end
+})
+
+InfoTab:CreateButton({
+    Name = "ℹ️ Selected Player Info",
+    Callback = function()
+        if SelectedPlayer then
+            Rayfield:Notify({
+                Title = "Current Selection",
+                Content = SelectedPlayer.Name .. "\nID: " .. SelectedPlayer.UserId .. "\nAccount Age: " .. SelectedPlayer.AccountAge .. " days",
+                Duration = 5
+            })
+        else
+            Rayfield:Notify({
+                Title = "No Selection",
+                Content = "Please select a player first",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- Auto refresh player list
+Players.PlayerAdded:Connect(function()
+    task.wait(1)
+    pcall(function()
+        PlayerDropdown:Refresh(GetPlayerNames())
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function()
+    task.wait(1)
+    pcall(function()
+        PlayerDropdown:Refresh(GetPlayerNames())
+        if SelectedPlayer and not SelectedPlayer.Parent then
+            SelectedPlayer = nil
+        end
+    end)
+end)
+
+Rayfield:LoadConfiguration()
