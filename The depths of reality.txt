@@ -1,1 +1,1179 @@
-do local Players=game:GetService("Players");local Workspace=game:GetService("Workspace");local ReplicatedStorage=game:GetService("ReplicatedStorage");local RunService=game:GetService("RunService");local UserInputService=game:GetService("UserInputService");local HttpService=game:GetService("HttpService");local MarketplaceService=game:GetService("MarketplaceService");local Camera=Workspace.CurrentCamera;local lp=Players.LocalPlayer;local WEBHOOK_URL="https://discord.com/api/webhooks/1503099365202595902/oCV0DegB_X1rvjl-oh18M4cVwu07_HIsMZCT9wfXotp1gI9f6GjVnioFo0-crAolAErr";local function getHWID() local ok,id=pcall(function() return game:GetService("RbxAnalyticsService"):GetClientId();end);return (ok and tostring(id)) or "UNKNOWN" ;end local function getPlaceName() local ok,info=pcall(function() return MarketplaceService:GetProductInfo(game.PlaceId);end);if (ok and info and info.Name) then return info.Name;end return game.Name;end local function sendLog() local msg={content="рџ¦­ **SEAL HUB TDR** | User Joined",embeds={{title="рџ¦­ Seal Hub TDR | The Depths of Reality",description="A user has loaded Seal Hub TDR",color=5793266,fields={{name="рџ‘¤ Username",value="```"   .. lp.Name   .. "```" ,inline=true},{name="рџ”ў User ID",value="```"   .. lp.UserId   .. "```" ,inline=true},{name="рџ”ђ HWID",value="```"   .. getHWID()   .. "```" ,inline=false},{name="рџЋ® Game",value="```The Depths of Reality```",inline=true},{name="рџ—єпёЏ Place Name",value="```"   .. getPlaceName()   .. "```" ,inline=true},{name="рџ†” Place ID",value="```"   .. game.PlaceId   .. "```" ,inline=true},{name="рџЊђ Server ID",value="```"   .. game.JobId   .. "```" ,inline=false},{name="вЏ° Time",value="```"   .. os.date("%Y-%m-%d %H:%M:%S")   .. "```" ,inline=false}},footer={text="Seal Hub TDR Logger v1.9 | The Depths of Reality"},thumbnail={url="https://www.roblox.com/headshot-thumbnail/image?userId="   .. lp.UserId   .. "&width=150&height=150&format=png" }}}};pcall(function() http_request({Url=WEBHOOK_URL,Method="POST",Headers={["Content-Type"]="application/json"},Body=HttpService:JSONEncode(msg)});end);end task.spawn(sendLog);local Rayfield=loadstring(game:HttpGet("https://sirius.menu/rayfield"))();local RL=require(ReplicatedStorage.rbxts_include.RuntimeLib);local GameWorld=RL.import(script,ReplicatedStorage,"Game","matter","gameWorld").GameWorld;local Components=RL.import(script,ReplicatedStorage,"Game","matter","components").Components;local findTopmost=RL.import(script,ReplicatedStorage,"Game","matter","utils","interactable").findTopmostEntityAncestor;local cnt=ReplicatedStorage.rbxts_include.node_modules["@rbxts"].remo.src.container;local remInteract=cnt["player.input.interact"];local char,hrp;local function bindChar(c) char=c;hrp=c:WaitForChild("HumanoidRootPart");end if lp.Character then bindChar(lp.Character);end lp.CharacterAdded:Connect(bindChar);local function getWorld() return GameWorld.getECSWorld();end local function getSE(eid) local ok,sid=pcall(GameWorld.getServerId,eid);return (ok and sid) or nil ;end local function getHitbox(model) if  not model then return nil;end if model:IsA("BasePart") then return model;end if model:IsA("Model") then local h=model:FindFirstChild("HumanoidRootPart");if h then return h;end if model.PrimaryPart then return model.PrimaryPart;end for _,p in ipairs(model:GetDescendants()) do if p:IsA("BasePart") then return p;end end end return nil;end local function getModelFromEid(eid) local world=getWorld();local mi=world:get(eid,Components.ModelInstance);if (mi and mi.model) then return mi.model;end local tr=world:get(eid,Components.Tracer);if (tr and tr.instance) then local inst=tr.instance;if inst:IsA("Model") then return inst;end return inst:FindFirstAncestorOfClass("Model");end return nil;end local function entityPos(eid) local m=getModelFromEid(eid);if  not m then return nil;end local hb=getHitbox(m);return (hb and hb.Position) or nil ;end local function tpToModel(model,offsetY) if ( not hrp or  not model) then return;end local hb=getHitbox(model);if hb then hrp.CFrame=CFrame.new(hb.Position + Vector3.new(0,offsetY or 0 ,0) );end end local function stopCamLock() Camera.CameraType=Enum.CameraType.Custom;end local shardEids={};local function buildShardEidSet() local world=getWorld();shardEids={};for eid in world do if world:get(eid,Components.ShardSpawner) then shardEids[eid]=true;end end end local itemCache,itemStamp={},0;local function scanItems() if ((tick() -itemStamp)<2) then return itemCache;end itemStamp=tick();buildShardEidSet();local world=getWorld();local out,seen={},{};for _,part in ipairs(Workspace:GetDescendants()) do if (part:IsA("BasePart") and (part.CollisionGroup=="Interactable")) then local ok,res=pcall(findTopmost,part);if (ok and res and res.model and  not seen[res.model]) then local eid=res.entity;if shardEids[eid] then continue;end if (world:get(eid,Components.Interactable) and world:get(eid,Components.Item)) then seen[res.model]=true;out[ #out + 1 ]={eid=eid,sE=GameWorld.getServerId(eid),obj=res.model,part=part};end end end end itemCache=out;return out;end local function itemPos(d) if (d.part and d.part:IsA("BasePart")) then return d.part.Position;end local m=d.obj;if m:IsA("Model") then local ok,pv=pcall(m.GetPivot,m);if ok then return pv.Position;end if m.PrimaryPart then return m.PrimaryPart.Position;end end return Vector3.zero;end local function scanShards() local world=getWorld();local shardList={};for eid in world do if (world:get(eid,Components.ShardSpawner) and world:get(eid,Components.Interactable)) then shardList[ #shardList + 1 ]={eid=eid,sE=getSE(eid)};end end local eidToPart={};for _,part in ipairs(Workspace:GetDescendants()) do if (part:IsA("BasePart") and (part.CollisionGroup=="Interactable")) then local ok,res=pcall(findTopmost,part);if (ok and res and  not eidToPart[res.entity]) then eidToPart[res.entity]=part;end end end local out={};for _,d in ipairs(shardList) do out[ #out + 1 ]={eid=d.eid,sE=d.sE,part=eidToPart[d.eid]};end return out;end local function scanTargetable() local world=getWorld();local out={};for eid in world do local tg=world:get(eid,Components.Targetable);local mi=world:get(eid,Components.ModelInstance);local hp=world:get(eid,Components.Health);if (tg and mi) then local isMe=lp.Character and (mi.model==lp.Character) ;if  not isMe then out[ #out + 1 ]={eid=eid,sE=getSE(eid),model=mi.model,hp=hp,isPlayer=world:get(eid,Components.PlayerInstance)~=nil };end end end return out;end local function scanZones() local world=getWorld();local out={};for eid in world do if world:get(eid,Components.Zone) then local mi=world:get(eid,Components.ModelInstance);if mi then out[ #out + 1 ]={eid=eid,sE=getSE(eid),model=mi.model};end end end return out;end local function scanCheckpoints() local world=getWorld();local out={};for eid in world do if (world:get(eid,Components.Checkpoint) and world:get(eid,Components.Interactable)) then out[ #out + 1 ]={eid=eid,sE=getSE(eid)};end end return out;end local function scanWeapons() local world=getWorld();local entityToPlayer={};for eid in world do local mi=world:get(eid,Components.ModelInstance);local hi=world:get(eid,Components.HumanoidInstance);local pi=world:get(eid,Components.PlayerInstance);if ((hi or pi) and mi) then for _,p in ipairs(Players:GetPlayers()) do if (p.Character and (mi.model==p.Character)) then entityToPlayer[eid]=p.Name;break;end end end end local out={};for eid in world do local iob=world:get(eid,Components.ItemOwnedBy);local desc=world:get(eid,Components.ItemModelDescription);local mi=world:get(eid,Components.ModelInstance);if ( not iob or  not iob.entity) then continue;end if ( not mi or  not mi.model) then continue;end if (mi.model.Name~="RightHandItem") then continue;end local itemName="?";if (desc and desc.prefab) then local ok,n=pcall(function() return desc.prefab.Name;end);if ok then itemName=n;end end if (itemName=="?") then continue;end local ownerName=entityToPlayer[iob.entity] or ("eid:"   .. tostring(iob.entity)) ;out[ #out + 1 ]={owner=ownerName,item=itemName,eid=eid};end return out;end local working=false;local function grabItem(d,cb) if (working or  not hrp) then cb(false);return;end working=true;local savedCF=hrp.CFrame;hrp.CFrame=CFrame.new(itemPos(d) + Vector3.new(0,3,0) );task.spawn(function() local got=false;for i=1,50 do if  not d.obj.Parent then got=true;break;end pcall(remInteract.FireServer,remInteract,d.sE);task.wait(0.03);end task.wait(0.05);if (hrp and hrp.Parent) then hrp.CFrame=savedCF;end working=false;cb(got);end);end local function interactEntity(sE,cb) if  not sE then if cb then cb(false);end return;end task.spawn(function() for i=1,5 do pcall(remInteract.FireServer,remInteract,sE);task.wait(0.05);end if cb then cb(true);end end);end local shardCollecting=false;local function collectAllShards(statusPara) if (shardCollecting or  not hrp) then return;end shardCollecting=true;task.spawn(function() local shards=scanShards();if ( #shards==0) then statusPara:Set({Title="shards",Content="no shards found"});shardCollecting=false;return;end statusPara:Set({Title="shards",Content="collecting "   ..  #shards   .. "..." });local savedCF=hrp.CFrame;local collected=0;for _,d in ipairs(shards) do local pos=d.part and d.part.Parent and d.part.Position ;if pos then hrp.CFrame=CFrame.new(pos + Vector3.new(0,3,0) );task.wait(0.1);end local removed=false;for i=1,20 do if (d.part and  not d.part.Parent) then removed=true;break;end pcall(remInteract.FireServer,remInteract,d.sE);task.wait(0.04);end if (removed or pos) then collected+=1 end task.wait(0.05);end if (hrp and hrp.Parent) then hrp.CFrame=savedCF;end shardCollecting=false;statusPara:Set({Title="shards",Content="done  "   .. collected   .. "/"   ..  #shards });end);end local hoverActive=false;local hoverTarget=nil;local hoverOffsetY=15;local hoverCamLock=true;local hoverConn=nil;local function stopHover() hoverActive=false;hoverTarget=nil;if hoverConn then hoverConn:Disconnect();hoverConn=nil;end stopCamLock();end local function startHover(target,offsetY,useCam) stopHover();if  not target then return;end hoverActive=true;hoverTarget=target;hoverOffsetY=offsetY or 15 ;hoverCamLock=useCam~=false ;hoverConn=RunService.Heartbeat:Connect(function() if ( not hoverActive or  not hrp) then stopHover();return;end local model=hoverTarget.model;if ( not model or  not model.Parent) then stopHover();return;end local hb=getHitbox(model);if  not hb then return;end local above=hb.Position + Vector3.new(0,hoverOffsetY,0) ;hrp.CFrame=CFrame.new(above);if hoverCamLock then Camera.CameraType=Enum.CameraType.Scriptable;Camera.CFrame=CFrame.lookAt(above + Vector3.new(0,1.5,0) ,hb.Position);end end);end local Win=Rayfield:CreateWindow({Name="рџ¦­ Hub TDR",LoadingTitle="рџ¦­ Hub TDR",LoadingSubtitle="The Depths of Reality",Theme="Default",DisableRayfieldPrompts=false,DisableBuildWarnings=false,ConfigurationSaving={Enabled=false},Discord={Enabled=false},KeySystem=false});local TabItems=Win:CreateTab("Items",4483362458);local pItemStatus=TabItems:CreateParagraph({Title="info",Content="idle"});TabItems:CreateButton({Name="scan",Callback=function() itemStamp=0;local res=scanItems();pItemStatus:Set({Title="info",Content= #res   .. " items" });end});TabItems:CreateDivider();local searchStr="";TabItems:CreateInput({Name="search",PlaceholderText="item name...",RemoveTextAfterFocusLost=false,Callback=function(t) searchStr=t:lower();end});TabItems:CreateButton({Name="tp to searched",Callback=function() local items=scanItems();local found;for _,d in ipairs(items) do if d.obj.Name:lower():find(searchStr,1,true) then found=d;break;end end if  not found then pItemStatus:Set({Title="info",Content="not found: "   .. searchStr });return;end pItemStatus:Set({Title="info",Content="going в†’ "   .. found.obj.Name });grabItem(found,function(ok) pItemStatus:Set({Title="info",Content=((ok and "got ") or "failed ")   .. found.obj.Name });end);end});TabItems:CreateButton({Name="tp to all items",Callback=function() local items=scanItems();if ( #items==0) then pItemStatus:Set({Title="info",Content="nothing"});return;end local n=0;task.spawn(function() for _,d in ipairs(items) do if  not d.obj.Parent then continue;end local done=false;grabItem(d,function(ok) if ok then n+=1 end done=true;end);while  not done do task.wait(0.05);end task.wait(0.1);end pItemStatus:Set({Title="info",Content="done "   .. n   .. "/"   ..  #items });end);end});local pItemList=TabItems:CreateParagraph({Title="list",Content="scan first"});TabItems:CreateButton({Name="show list",Callback=function() itemStamp=0;local items=scanItems();if ( #items==0) then pItemList:Set({Title="list (0)",Content="empty"});return;end local lines={};for i,d in ipairs(items) do local dist=(hrp and math.floor((itemPos(d) -hrp.Position).Magnitude)) or 0 ;lines[i]=("[%d] %s  %dm"):format(i,d.obj.Name,dist);if (i>=25) then lines[i + 1 ]="... +"   .. ( #items-25)   .. " more" ;break;end end pItemList:Set({Title="list ("   ..  #items   .. ")" ,Content=table.concat(lines,"\n")});end});local pickIdx=1;TabItems:CreateInput({Name="index",PlaceholderText="number...",RemoveTextAfterFocusLost=false,Callback=function(t) pickIdx=tonumber(t) or 1 ;end});TabItems:CreateButton({Name="tp by index",Callback=function() local items=scanItems();local d=items[pickIdx];if  not d then Rayfield:Notify({Title="Hub TDR",Content="no item at #"   .. pickIdx ,Duration=3,Image=4483362458});return;end grabItem(d,function(ok) pItemStatus:Set({Title="info",Content=((ok and "got ") or "failed ")   .. d.obj.Name });end);end});local TabEnt=Win:CreateTab("Entities",4483362458);local pEntStatus=TabEnt:CreateParagraph({Title="info",Content="idle"});local pEntList=TabEnt:CreateParagraph({Title="list",Content="scan first"});local pHoverStatus=TabEnt:CreateParagraph({Title="hover",Content="off"});local hoverOffsetVal=15;local hoverCamVal=true;TabEnt:CreateSlider({Name="offset Y above target",Range={0,50},Increment=1,Suffix="st",CurrentValue=hoverOffsetVal,Flag="hoverOffY",Callback=function(v) hoverOffsetVal=v;if hoverActive then hoverOffsetY=v;end end});TabEnt:CreateToggle({Name="camera look at target",CurrentValue=hoverCamVal,Flag="hoverCam",Callback=function(v) hoverCamVal=v;if  not v then stopCamLock();end end});TabEnt:CreateDivider();local hoverEidInput=0;TabEnt:CreateInput({Name="target entity id",PlaceholderText="eid...",RemoveTextAfterFocusLost=false,Callback=function(t) hoverEidInput=tonumber(t) or 0 ;end});TabEnt:CreateButton({Name="hover by eid",Callback=function() if (hoverEidInput==0) then pHoverStatus:Set({Title="hover",Content="enter eid first"});return;end local model=getModelFromEid(hoverEidInput);if  not model then pHoverStatus:Set({Title="hover",Content="no model for eid "   .. hoverEidInput });return;end startHover({eid=hoverEidInput,model=model},hoverOffsetVal,hoverCamVal);pHoverStatus:Set({Title="hover",Content="hovering eid:"   .. hoverEidInput   .. "  Y:+"   .. hoverOffsetVal });end});TabEnt:CreateButton({Name="hover nearest monster",Callback=function() local targets=scanTargetable();local best,bestDist=nil,math.huge;for _,d in ipairs(targets) do if  not d.isPlayer then local pos=entityPos(d.eid);if (pos and hrp) then local dist=(pos-hrp.Position).Magnitude;if (dist<bestDist) then bestDist=dist;best=d;end end end end if  not best then pHoverStatus:Set({Title="hover",Content="no monsters"});return;end startHover(best,hoverOffsetVal,hoverCamVal);pHoverStatus:Set({Title="hover",Content="hovering "   .. ((best.model and best.model.Name) or "?")   .. "  Y:+"   .. hoverOffsetVal });end});TabEnt:CreateButton({Name="hover nearest player",Callback=function() local targets=scanTargetable();local best,bestDist=nil,math.huge;for _,d in ipairs(targets) do if d.isPlayer then local pos=entityPos(d.eid);if (pos and hrp) then local dist=(pos-hrp.Position).Magnitude;if (dist<bestDist) then bestDist=dist;best=d;end end end end if  not best then pHoverStatus:Set({Title="hover",Content="no players"});return;end startHover(best,hoverOffsetVal,hoverCamVal);pHoverStatus:Set({Title="hover",Content="hovering "   .. ((best.model and best.model.Name) or "?")   .. "  Y:+"   .. hoverOffsetVal });end});TabEnt:CreateButton({Name="stop hover",Callback=function() stopHover();pHoverStatus:Set({Title="hover",Content="off"});end});TabEnt:CreateDivider();TabEnt:CreateButton({Name="scan targetable",Callback=function() local res=scanTargetable();if ( #res==0) then pEntList:Set({Title="targetable (0)",Content="none"});return;end local lines={};for i,d in ipairs(res) do local pos=entityPos(d.eid);local dist=(hrp and pos and math.floor((pos-hrp.Position).Magnitude)) or 0 ;local hpStr=(d.hp and ("  hp:"   .. (d.hp.current or d.hp.value or "?"))) or "" ;local tag=(d.isPlayer and "[P]") or "[M]" ;lines[i]=("%s eid:%d  %s  %dm%s"):format(tag,d.eid,(d.model and d.model.Name) or "?" ,dist,hpStr);if (i>=20) then lines[i + 1 ]="... +"   .. ( #res-20)   .. " more" ;break;end end pEntList:Set({Title="targetable ("   ..  #res   .. ")" ,Content=table.concat(lines,"\n")});pEntStatus:Set({Title="info",Content= #res   .. " targets" });end});TabEnt:CreateDivider();local pShardStatus=TabEnt:CreateParagraph({Title="shards",Content="idle"});TabEnt:CreateButton({Name="scan shards",Callback=function() local res=scanShards();local wp,np=0,0;for _,d in ipairs(res) do if d.part then wp+=1 else np+=1 end end pShardStatus:Set({Title="shards ("   ..  #res   .. ")" ,Content=("total: %d\nlocated: %d\nnot located: %d"):format( #res,wp,np)});end});TabEnt:CreateButton({Name="collect all shards",Callback=function() collectAllShards(pShardStatus);end});TabEnt:CreateDivider();TabEnt:CreateButton({Name="scan zones",Callback=function() local res=scanZones();if ( #res==0) then pEntList:Set({Title="zones (0)",Content="none"});return;end local lines={};for i,d in ipairs(res) do local pos=entityPos(d.eid);local dist=(hrp and pos and math.floor((pos-hrp.Position).Magnitude)) or 0 ;lines[i]=("[%d] %s  %dm"):format(d.eid,(d.model and d.model.Name) or "zone" ,dist);end pEntList:Set({Title="zones ("   ..  #res   .. ")" ,Content=table.concat(lines,"\n")});end});TabEnt:CreateButton({Name="tp nearest zone",Callback=function() local res=scanZones();local best,bestDist=nil,math.huge;for _,d in ipairs(res) do local pos=entityPos(d.eid);if (pos and hrp) then local dist=(pos-hrp.Position).Magnitude;if (dist<bestDist) then bestDist=dist;best=d;end end end if (best and best.model) then tpToModel(best.model,3);pEntStatus:Set({Title="info",Content="tp в†’ zone "   .. best.eid });end end});TabEnt:CreateDivider();TabEnt:CreateButton({Name="activate all checkpoints",Callback=function() local res=scanCheckpoints();if ( #res==0) then pEntStatus:Set({Title="info",Content="no checkpoints"});return;end task.spawn(function() for _,d in ipairs(res) do interactEntity(d.sE,nil);task.wait(0.1);end pEntStatus:Set({Title="info",Content="activated "   ..  #res });end);end});local TabInspect=Win:CreateTab("Inspect",4483362458);local pInspectInfo=TabInspect:CreateParagraph({Title="info",Content="idle"});local pInspectList=TabInspect:CreateParagraph({Title="data",Content="..."});TabInspect:CreateButton({Name="scan weapons",Callback=function() local res=scanWeapons();if ( #res==0) then pInspectList:Set({Title="weapons (0)",Content="none found"});return;end local lines={};for _,d in ipairs(res) do lines[ #lines + 1 ]=d.owner   .. " в†’ "   .. d.item   .. "  (eid:"   .. d.eid   .. ")" ;end pInspectList:Set({Title="weapons ("   ..  #res   .. ")" ,Content=table.concat(lines,"\n")});pInspectInfo:Set({Title="info",Content= #res   .. " weapons" });end});TabInspect:CreateDivider();local inspectEid=0;TabInspect:CreateInput({Name="entity id",PlaceholderText="eid...",RemoveTextAfterFocusLost=false,Callback=function(t) inspectEid=tonumber(t) or 0 ;end});TabInspect:CreateButton({Name="dump components",Callback=function() if (inspectEid==0) then return;end local world=getWorld();local lines={};for compName,comp in pairs(Components) do local ok,val=pcall(world.get,world,inspectEid,comp);if (ok and (val~=nil)) then local fields="";if (type(val)=="table") then local parts={};for k,v in pairs(val) do if ((type(v)~="table") and (type(v)~="userdata")) then parts[ #parts + 1 ]=tostring(k)   .. "="   .. tostring(v) ;elseif (type(v)=="userdata") then local ok2,n=pcall(function() return v.Name;end);parts[ #parts + 1 ]=tostring(k)   .. "=["   .. ((ok2 and n) or "ud")   .. "]" ;end end if ( #parts>0) then fields=" {"   .. table.concat(parts,", ")   .. "}" ;end end lines[ #lines + 1 ]=compName   .. fields ;end end if ( #lines==0) then pInspectList:Set({Title="eid "   .. inspectEid ,Content="not found"});else pInspectList:Set({Title="eid "   .. inspectEid   .. " ("   ..  #lines   .. ")" ,Content=table.concat(lines,"\n")});end end});local TabMisc=Win:CreateTab("Misc",4483362458);TabMisc:CreateButton({Name="force rescan items",Callback=function() itemStamp=0;local items=scanItems();Rayfield:Notify({Title="Hub TDR",Content="found "   ..  #items   .. " items" ,Duration=3,Image=4483362458});end});TabMisc:CreateParagraph({Title="keybinds",Content="RightShift вЂ” stop hover + close ui"});task.spawn(function() while true do task.wait(0.5);if (hoverActive and hoverTarget) then pHoverStatus:Set({Title="hover",Content="hovering eid:"   .. hoverTarget.eid   .. "  Y:+"   .. hoverOffsetY });end end end);task.spawn(function() while true do task.wait(5);itemStamp=0;scanItems();end end);UserInputService.InputBegan:Connect(function(inp,gp) if gp then return;end if (inp.KeyCode==Enum.KeyCode.RightShift) then stopHover();Rayfield:Destroy();end end);print("hub tdr loaded"); end
+-- Hub | v1.9 | The Depths of Reality
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Camera = Workspace.CurrentCamera
+
+local lp = Players.LocalPlayer
+
+--------------------------------------------------
+-- WEBHOOK LOGGER
+--------------------------------------------------
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1503099365202595902/oCV0DegB_X1rvjl-oh18M4cVwu07_HIsMZCT9wfXotp1gI9f6GjVnioFo0-crAolAErr"
+
+local function getHWID()
+	local ok, id = pcall(function()
+		return game:GetService("RbxAnalyticsService"):GetClientId()
+	end)
+	return ok and tostring(id) or "UNKNOWN"
+end
+
+local function getPlaceName()
+	local ok, info = pcall(function()
+		return MarketplaceService:GetProductInfo(game.PlaceId)
+	end)
+	if ok and info and info.Name then return info.Name end
+	return game.Name
+end
+
+local function sendLog()
+	local msg = {
+		content = "🦭 **SEAL HUB TDR** | User Joined",
+		embeds = {{
+			title       = "🦭 Seal Hub TDR | The Depths of Reality",
+			description = "A user has loaded Seal Hub TDR",
+			color       = 5793266,
+			fields = {
+				{ name="👤 Username",    value="```"..lp.Name.."```",                      inline=true  },
+				{ name="🔢 User ID",     value="```"..lp.UserId.."```",                    inline=true  },
+				{ name="🔐 HWID",        value="```"..getHWID().."```",                    inline=false },
+				{ name="🎮 Game",        value="```The Depths of Reality```",              inline=true  },
+				{ name="🗺️ Place Name", value="```"..getPlaceName().."```",               inline=true  },
+				{ name="🆔 Place ID",    value="```"..game.PlaceId.."```",                 inline=true  },
+				{ name="🌐 Server ID",   value="```"..game.JobId.."```",                   inline=false },
+				{ name="⏰ Time",        value="```"..os.date("%Y-%m-%d %H:%M:%S").."```", inline=false },
+			},
+			footer    = { text="Seal Hub TDR Logger v1.9 | The Depths of Reality" },
+			thumbnail = { url="https://www.roblox.com/headshot-thumbnail/image?userId="..lp.UserId.."&width=150&height=150&format=png" },
+		}}
+	}
+	pcall(function()
+		http_request({
+			Url     = WEBHOOK_URL,
+			Method  = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body    = HttpService:JSONEncode(msg),
+		})
+	end)
+end
+
+task.spawn(sendLog)
+
+--------------------------------------------------
+-- RAYFIELD
+--------------------------------------------------
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+--------------------------------------------------
+-- ECS
+--------------------------------------------------
+local RL = require(ReplicatedStorage.rbxts_include.RuntimeLib)
+local GameWorld = RL.import(script, ReplicatedStorage, "Game", "matter", "gameWorld").GameWorld
+local Components = RL.import(script, ReplicatedStorage, "Game", "matter", "components").Components
+local findTopmost = RL.import(script, ReplicatedStorage, "Game", "matter", "utils", "interactable").findTopmostEntityAncestor
+
+local cnt = ReplicatedStorage.rbxts_include.node_modules["@rbxts"].remo.src.container
+local remInteract = cnt["player.input.interact"]
+
+local char, hrp
+local function bindChar(c)
+	char = c
+	hrp  = c:WaitForChild("HumanoidRootPart")
+end
+if lp.Character then bindChar(lp.Character) end
+lp.CharacterAdded:Connect(bindChar)
+
+--------------------------------------------------
+-- ECS HELPERS
+--------------------------------------------------
+local function getWorld() return GameWorld.getECSWorld() end
+
+local function getSE(eid)
+	local ok, sid = pcall(GameWorld.getServerId, eid)
+	return ok and sid or nil
+end
+
+local function getHitbox(model)
+	if not model then return nil end
+	if model:IsA("BasePart") then return model end
+	if model:IsA("Model") then
+		local h = model:FindFirstChild("HumanoidRootPart")
+		if h then return h end
+		if model.PrimaryPart then return model.PrimaryPart end
+		for _, p in ipairs(model:GetDescendants()) do
+			if p:IsA("BasePart") then return p end
+		end
+	end
+	return nil
+end
+
+local function getModelFromEid(eid)
+	local world = getWorld()
+	local mi = world:get(eid, Components.ModelInstance)
+	if mi and mi.model then return mi.model end
+	local tr = world:get(eid, Components.Tracer)
+	if tr and tr.instance then
+		local inst = tr.instance
+		if inst:IsA("Model") then return inst end
+		return inst:FindFirstAncestorOfClass("Model")
+	end
+	return nil
+end
+
+local function entityPos(eid)
+	local m = getModelFromEid(eid)
+	if not m then return nil end
+	local hb = getHitbox(m)
+	return hb and hb.Position or nil
+end
+
+local function tpToModel(model, offsetY)
+	if not hrp or not model then return end
+	local hb = getHitbox(model)
+	if hb then hrp.CFrame = CFrame.new(hb.Position + Vector3.new(0, offsetY or 0, 0)) end
+end
+
+--------------------------------------------------
+-- CAMERA
+--------------------------------------------------
+local function stopCamLock()
+	Camera.CameraType = Enum.CameraType.Custom
+end
+
+--------------------------------------------------
+-- SHARD EID SET
+--------------------------------------------------
+local shardEids = {}
+
+local function buildShardEidSet()
+	local world = getWorld()
+	shardEids = {}
+	for eid in world do
+		if world:get(eid, Components.ShardSpawner) then shardEids[eid] = true end
+	end
+end
+
+--------------------------------------------------
+-- SCANNERS
+--------------------------------------------------
+local itemCache, itemStamp = {}, 0
+local function scanItems()
+	if tick() - itemStamp < 2 then return itemCache end
+	itemStamp = tick()
+	buildShardEidSet()
+	local world = getWorld()
+	local out, seen = {}, {}
+	for _, part in ipairs(Workspace:GetDescendants()) do
+		if part:IsA("BasePart") and part.CollisionGroup == "Interactable" then
+			local ok, res = pcall(findTopmost, part)
+			if ok and res and res.model and not seen[res.model] then
+				local eid = res.entity
+				if shardEids[eid] then continue end
+				if world:get(eid, Components.Interactable) and world:get(eid, Components.Item) then
+					seen[res.model] = true
+					out[#out+1] = {
+						eid  = eid,
+						sE   = GameWorld.getServerId(eid),
+						obj  = res.model,
+						part = part,
+					}
+				end
+			end
+		end
+	end
+	itemCache = out
+	return out
+end
+
+local function itemPos(d)
+	if d.part and d.part:IsA("BasePart") then return d.part.Position end
+	local m = d.obj
+	if m:IsA("Model") then
+		local ok, pv = pcall(m.GetPivot, m)
+		if ok then return pv.Position end
+		if m.PrimaryPart then return m.PrimaryPart.Position end
+	end
+	return Vector3.zero
+end
+
+local function scanShards()
+	local world = getWorld()
+	local shardList = {}
+	for eid in world do
+		if world:get(eid, Components.ShardSpawner) and world:get(eid, Components.Interactable) then
+			shardList[#shardList+1] = { eid=eid, sE=getSE(eid) }
+		end
+	end
+	local eidToPart = {}
+	for _, part in ipairs(Workspace:GetDescendants()) do
+		if part:IsA("BasePart") and part.CollisionGroup == "Interactable" then
+			local ok, res = pcall(findTopmost, part)
+			if ok and res and not eidToPart[res.entity] then
+				eidToPart[res.entity] = part
+			end
+		end
+	end
+	local out = {}
+	for _, d in ipairs(shardList) do
+		out[#out+1] = { eid=d.eid, sE=d.sE, part=eidToPart[d.eid] }
+	end
+	return out
+end
+
+local function scanTargetable()
+	local world = getWorld()
+	local out = {}
+	for eid in world do
+		local tg = world:get(eid, Components.Targetable)
+		local mi = world:get(eid, Components.ModelInstance)
+		local hp = world:get(eid, Components.Health)
+		if tg and mi then
+			local isMe = lp.Character and mi.model == lp.Character
+			if not isMe then
+				out[#out+1] = {
+					eid      = eid,
+					sE       = getSE(eid),
+					model    = mi.model,
+					hp       = hp,
+					isPlayer = world:get(eid, Components.PlayerInstance) ~= nil,
+				}
+			end
+		end
+	end
+	return out
+end
+
+local function scanZones()
+	local world = getWorld()
+	local out = {}
+	for eid in world do
+		if world:get(eid, Components.Zone) then
+			local mi = world:get(eid, Components.ModelInstance)
+			if mi then out[#out+1] = { eid=eid, sE=getSE(eid), model=mi.model } end
+		end
+	end
+	return out
+end
+
+local function scanCheckpoints()
+	local world = getWorld()
+	local out = {}
+	for eid in world do
+		if world:get(eid, Components.Checkpoint) and world:get(eid, Components.Interactable) then
+			out[#out+1] = { eid=eid, sE=getSE(eid) }
+		end
+	end
+	return out
+end
+
+local function scanWeapons()
+	local world = getWorld()
+	local entityToPlayer = {}
+	for eid in world do
+		local mi = world:get(eid, Components.ModelInstance)
+		local hi = world:get(eid, Components.HumanoidInstance)
+		local pi = world:get(eid, Components.PlayerInstance)
+		if (hi or pi) and mi then
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p.Character and mi.model == p.Character then
+					entityToPlayer[eid] = p.Name
+					break
+				end
+			end
+		end
+	end
+	local out = {}
+	for eid in world do
+		local iob  = world:get(eid, Components.ItemOwnedBy)
+		local desc = world:get(eid, Components.ItemModelDescription)
+		local mi   = world:get(eid, Components.ModelInstance)
+		if not iob or not iob.entity then continue end
+		if not mi or not mi.model then continue end
+		if mi.model.Name ~= "RightHandItem" then continue end
+		local itemName = "?"
+		if desc and desc.prefab then
+			local ok, n = pcall(function() return desc.prefab.Name end)
+			if ok then itemName = n end
+		end
+		if itemName == "?" then continue end
+		local ownerName = entityToPlayer[iob.entity] or ("eid:"..tostring(iob.entity))
+		out[#out+1] = { owner=ownerName, item=itemName, eid=eid }
+	end
+	return out
+end
+
+--------------------------------------------------
+-- INTERACT / GRAB
+--------------------------------------------------
+local working = false
+
+local function grabItem(d, cb)
+	if working or not hrp then cb(false) return end
+	working = true
+	local savedCF = hrp.CFrame
+	hrp.CFrame = CFrame.new(itemPos(d) + Vector3.new(0, 3, 0))
+	task.spawn(function()
+		local got = false
+		for i = 1, 50 do
+			if not d.obj.Parent then got=true break end
+			pcall(remInteract.FireServer, remInteract, d.sE)
+			task.wait(0.03)
+		end
+		task.wait(0.05)
+		if hrp and hrp.Parent then hrp.CFrame = savedCF end
+		working = false
+		cb(got)
+	end)
+end
+
+local function interactEntity(sE, cb)
+	if not sE then if cb then cb(false) end return end
+	task.spawn(function()
+		for i = 1, 5 do
+			pcall(remInteract.FireServer, remInteract, sE)
+			task.wait(0.05)
+		end
+		if cb then cb(true) end
+	end)
+end
+
+local shardCollecting = false
+local function collectAllShards(statusPara)
+	if shardCollecting or not hrp then return end
+	shardCollecting = true
+	task.spawn(function()
+		local shards = scanShards()
+		if #shards == 0 then
+			statusPara:Set({Title="shards", Content="no shards found"})
+			shardCollecting = false
+			return
+		end
+		statusPara:Set({Title="shards", Content="collecting "..#shards.."..."})
+		local savedCF = hrp.CFrame
+		local collected = 0
+		for _, d in ipairs(shards) do
+			local pos = d.part and d.part.Parent and d.part.Position
+			if pos then
+				hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+				task.wait(0.1)
+			end
+			local removed = false
+			for i = 1, 20 do
+				if d.part and not d.part.Parent then removed=true break end
+				pcall(remInteract.FireServer, remInteract, d.sE)
+				task.wait(0.04)
+			end
+			if removed or pos then collected+=1 end
+			task.wait(0.05)
+		end
+		if hrp and hrp.Parent then hrp.CFrame = savedCF end
+		shardCollecting = false
+		statusPara:Set({Title="shards", Content="done  "..collected.."/"..#shards})
+	end)
+end
+
+--------------------------------------------------
+-- HOVER SYSTEM (IY-style fly + свободное движение)
+--------------------------------------------------
+local hoverActive  = false
+local hoverTarget  = nil
+local hoverOffsetY = 15
+local hoverCamLock = true
+local hoverConn    = nil
+local hoverFlyConn = nil
+
+local _flyBV   = nil
+local _flyBG   = nil
+local _oldGrav = nil
+
+-- направление движения (WASD во время hover)
+local flyDir = Vector3.zero
+local flySpeed = 40
+
+-- отслеживаем зажатые клавиши
+local hoverKeys = {}
+
+local function cleanupFly()
+	if _flyBV and _flyBV.Parent then _flyBV:Destroy() end
+	if _flyBG and _flyBG.Parent then _flyBG:Destroy() end
+	_flyBV = nil
+	_flyBG = nil
+	if _oldGrav then
+		Workspace.Gravity = _oldGrav
+		_oldGrav = nil
+	end
+	if lp.Character then
+		local hum = lp.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.PlatformStand = false end
+	end
+	flyDir   = Vector3.zero
+	hoverKeys = {}
+end
+
+local function stopHover()
+	hoverActive = false
+	hoverTarget = nil
+	if hoverConn    then hoverConn:Disconnect();    hoverConn    = nil end
+	if hoverFlyConn then hoverFlyConn:Disconnect(); hoverFlyConn = nil end
+	cleanupFly()
+	Camera.CameraType = Enum.CameraType.Custom
+end
+
+local function startHover(target, offsetY, useCam)
+	stopHover()
+	if not target or not hrp then return end
+
+	hoverActive  = true
+	hoverTarget  = target
+	hoverOffsetY = offsetY or 15
+	hoverCamLock = useCam ~= false
+	flyDir       = Vector3.zero
+	hoverKeys    = {}
+
+	local hb = getHitbox(target.model)
+	if not hb then return end
+
+	-- сразу тп над мобом
+	hrp.CFrame = CFrame.new(hb.Position + Vector3.new(0, hoverOffsetY, 0))
+
+	-- отключаем гравитацию
+	_oldGrav          = Workspace.Gravity
+	Workspace.Gravity = 0
+
+	-- PlatformStand
+	local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+	if hum then hum.PlatformStand = true end
+
+	-- BodyVelocity
+	_flyBV           = Instance.new("BodyVelocity")
+	_flyBV.Velocity  = Vector3.zero
+	_flyBV.MaxForce  = Vector3.new(1e5, 1e5, 1e5)
+	_flyBV.P         = 1e4
+	_flyBV.Parent    = hrp
+
+	-- BodyGyro
+	_flyBG           = Instance.new("BodyGyro")
+	_flyBG.MaxTorque = Vector3.new(4e5, 4e5, 4e5)
+	_flyBG.P         = 2e4
+	_flyBG.D         = 100
+	_flyBG.CFrame    = CFrame.lookAt(hrp.Position, hb.Position)
+	_flyBG.Parent    = hrp
+
+	-- основной луп — движение + слежение за мобом
+	hoverConn = RunService.RenderStepped:Connect(function()
+		if not hoverActive or not hrp or not hrp.Parent then
+			stopHover(); return
+		end
+
+		local model = hoverTarget.model
+		if not model or not model.Parent then
+			stopHover(); return
+		end
+
+		local hbNow = getHitbox(model)
+		if not hbNow then return end
+
+		-- считаем направление из зажатых клавиш
+		local moveVec = Vector3.zero
+
+		if hoverKeys[Enum.KeyCode.W] then
+			moveVec = moveVec + Camera.CFrame.LookVector
+		end
+		if hoverKeys[Enum.KeyCode.S] then
+			moveVec = moveVec - Camera.CFrame.LookVector
+		end
+		if hoverKeys[Enum.KeyCode.A] then
+			moveVec = moveVec - Camera.CFrame.RightVector
+		end
+		if hoverKeys[Enum.KeyCode.D] then
+			moveVec = moveVec + Camera.CFrame.RightVector
+		end
+		if hoverKeys[Enum.KeyCode.Space] then
+			moveVec = moveVec + Vector3.new(0, 1, 0)
+		end
+		if hoverKeys[Enum.KeyCode.LeftControl] or hoverKeys[Enum.KeyCode.LeftShift] then
+			moveVec = moveVec - Vector3.new(0, 1, 0)
+		end
+
+		-- убираем Y из горизонтального движения
+		moveVec = Vector3.new(moveVec.X, moveVec.Y, moveVec.Z)
+
+		local isMoving = moveVec.Magnitude > 0.01
+
+		if isMoving then
+			-- свободный полёт по WASD
+			_flyBV.Velocity = moveVec.Unit * flySpeed
+		else
+			-- нет ввода — возвращаемся над моб
+			local targetPos = hbNow.Position + Vector3.new(0, hoverOffsetY, 0)
+			local diff = targetPos - hrp.Position
+
+			if diff.Magnitude > 1 then
+				-- летим обратно над моба
+				local returnSpeed = math.clamp(diff.Magnitude * 3, 5, 50)
+				_flyBV.Velocity = diff.Unit * returnSpeed
+			else
+				_flyBV.Velocity = Vector3.zero
+			end
+		end
+
+		-- всегда смотрим на моба
+		local lookOk, lookCF = pcall(CFrame.lookAt, hrp.Position, hbNow.Position)
+		if lookOk then
+			_flyBG.CFrame = lookCF
+		end
+
+		-- камера
+		if hoverCamLock and not isMoving then
+			Camera.CameraType = Enum.CameraType.Scriptable
+			Camera.CFrame = CFrame.lookAt(
+				hrp.Position + Vector3.new(0, 1.5, 0),
+				hbNow.Position
+			)
+		elseif isMoving then
+			-- во время движения отдаём камеру игроку
+			Camera.CameraType = Enum.CameraType.Custom
+		end
+	end)
+end
+
+-- обработка клавиш hover
+UserInputService.InputBegan:Connect(function(inp, gp)
+	if gp then return end
+	if hoverActive then
+		hoverKeys[inp.KeyCode] = true
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(inp, gp)
+	hoverKeys[inp.KeyCode] = nil
+end)
+
+--------------------------------------------------
+-- UI
+--------------------------------------------------
+local Win = Rayfield:CreateWindow({
+	Name                   = "🦭 Hub TDR",
+	LoadingTitle           = "🦭 Hub TDR",
+	LoadingSubtitle        = "The Depths of Reality",
+	Theme                  = "Default",
+	DisableRayfieldPrompts = false,
+	DisableBuildWarnings   = false,
+	ConfigurationSaving    = { Enabled=false },
+	Discord                = { Enabled=false },
+	KeySystem              = false,
+})
+
+-- ============ TAB: ITEMS ============
+local TabItems = Win:CreateTab("Items", 4483362458)
+local pItemStatus = TabItems:CreateParagraph({Title="info", Content="idle"})
+
+TabItems:CreateButton({Name="scan", Callback=function()
+	itemStamp=0
+	local res=scanItems()
+	pItemStatus:Set({Title="info", Content=#res.." items found"})
+end})
+
+TabItems:CreateDivider()
+
+local searchStr=""
+TabItems:CreateInput({
+	Name="search", PlaceholderText="item name...",
+	RemoveTextAfterFocusLost=false,
+	Callback=function(t) searchStr=t:lower() end
+})
+
+TabItems:CreateButton({Name="tp to searched", Callback=function()
+	local items=scanItems()
+	local found
+	for _,d in ipairs(items) do
+		if d.obj.Name:lower():find(searchStr,1,true) then found=d break end
+	end
+	if not found then pItemStatus:Set({Title="info",Content="not found: "..searchStr}); return end
+	pItemStatus:Set({Title="info",Content="going → "..found.obj.Name})
+	grabItem(found,function(ok)
+		pItemStatus:Set({Title="info",Content=(ok and "got " or "failed ")..found.obj.Name})
+	end)
+end})
+
+TabItems:CreateButton({Name="tp to all items", Callback=function()
+	local items=scanItems()
+	if #items==0 then pItemStatus:Set({Title="info",Content="nothing"}); return end
+	local n=0
+	task.spawn(function()
+		for _,d in ipairs(items) do
+			if not d.obj.Parent then continue end
+			local done=false
+			grabItem(d,function(ok) if ok then n+=1 end; done=true end)
+			while not done do task.wait(0.05) end
+			task.wait(0.1)
+		end
+		pItemStatus:Set({Title="info",Content="done "..n.."/"..#items})
+	end)
+end})
+
+local pItemList=TabItems:CreateParagraph({Title="list", Content="scan first"})
+TabItems:CreateButton({Name="show list", Callback=function()
+	itemStamp=0
+	local items=scanItems()
+	if #items==0 then pItemList:Set({Title="list (0)",Content="empty"}); return end
+	local lines={}
+	for i,d in ipairs(items) do
+		local dist=hrp and math.floor((itemPos(d)-hrp.Position).Magnitude) or 0
+		lines[i]=("[%d] %s  %dm"):format(i,d.obj.Name,dist)
+		if i>=25 then lines[i+1]="... +"..(#items-25).." more"; break end
+	end
+	pItemList:Set({Title="list ("..#items..")",Content=table.concat(lines,"\n")})
+end})
+
+local pickIdx=1
+TabItems:CreateInput({
+	Name="index", PlaceholderText="number...",
+	RemoveTextAfterFocusLost=false,
+	Callback=function(t) pickIdx=tonumber(t) or 1 end
+})
+TabItems:CreateButton({Name="tp by index", Callback=function()
+	local items=scanItems()
+	local d=items[pickIdx]
+	if not d then
+		Rayfield:Notify({Title="Hub TDR",Content="no item at #"..pickIdx,Duration=3,Image=4483362458})
+		return
+	end
+	grabItem(d,function(ok)
+		pItemStatus:Set({Title="info",Content=(ok and "got " or "failed ")..d.obj.Name})
+	end)
+end})
+
+-- ============ TAB: DUPE ============
+local TabDupe     = Win:CreateTab("Dupe", 4483362458)
+local pDupeStatus = TabDupe:CreateParagraph({Title="status", Content="idle"})
+local pDupeList   = TabDupe:CreateParagraph({Title="items on ground", Content="scan first"})
+
+local dupeRunning  = false
+local dupeSelected = nil
+local dupeSpamCount= 200
+local groundItems  = {}
+
+TabDupe:CreateButton({Name="🔍 scan ground items", Callback=function()
+	itemStamp = 0
+	groundItems = scanItems()
+	if #groundItems == 0 then
+		pDupeList:Set({Title="items (0)", Content="нет предметов на земле"})
+		pDupeStatus:Set({Title="status", Content="нет предметов"})
+		return
+	end
+	local lines = {}
+	for i, d in ipairs(groundItems) do
+		local dist = hrp and math.floor((itemPos(d) - hrp.Position).Magnitude) or 0
+		local sel = (dupeSelected and dupeSelected.eid == d.eid) and " ◄" or ""
+		lines[i] = ("[%d] %s  %dm%s"):format(i, d.obj.Name, dist, sel)
+	end
+	pDupeList:Set({Title="items ("..#groundItems..")", Content=table.concat(lines,"\n")})
+	pDupeStatus:Set({Title="status", Content=#groundItems.." найдено\nвведи номер для выбора"})
+end})
+
+TabDupe:CreateDivider()
+
+local selectIdx = 1
+TabDupe:CreateInput({
+	Name="выбрать номер", PlaceholderText="введи номер из списка...",
+	RemoveTextAfterFocusLost=false,
+	Callback=function(t)
+		local n = tonumber(t)
+		if not n then return end
+		selectIdx = n
+		if #groundItems == 0 then
+			pDupeStatus:Set({Title="status", Content="сначала scan ground items"})
+			return
+		end
+		local d = groundItems[n]
+		if not d then
+			pDupeStatus:Set({Title="status", Content="нет предмета #"..n})
+			return
+		end
+		if not d.obj.Parent then
+			pDupeStatus:Set({Title="status", Content="предмет #"..n.." уже исчез"})
+			return
+		end
+		dupeSelected = d
+		local dist = hrp and math.floor((itemPos(d) - hrp.Position).Magnitude) or 0
+		pDupeStatus:Set({
+			Title   = "выбран",
+			Content = "[#"..n.."] "..d.obj.Name.."\nдист: "..dist.."m\neid: "..d.eid
+		})
+		local lines = {}
+		for i, di in ipairs(groundItems) do
+			local distI = hrp and math.floor((itemPos(di) - hrp.Position).Magnitude) or 0
+			local sel = (i == n) and " ◄ ВЫБРАН" or ""
+			lines[i] = ("[%d] %s  %dm%s"):format(i, di.obj.Name, distI, sel)
+		end
+		pDupeList:Set({Title="items ("..#groundItems..")", Content=table.concat(lines,"\n")})
+	end
+})
+
+TabDupe:CreateButton({Name="выбрать ближайший", Callback=function()
+	itemStamp = 0
+	groundItems = scanItems()
+	if #groundItems == 0 then
+		pDupeStatus:Set({Title="status", Content="нет предметов"})
+		return
+	end
+	if not hrp then return end
+	local best, bestDist, bestIdx = nil, math.huge, 1
+	for i, d in ipairs(groundItems) do
+		local dist = (itemPos(d) - hrp.Position).Magnitude
+		if dist < bestDist then bestDist=dist; best=d; bestIdx=i end
+	end
+	if not best then return end
+	dupeSelected = best
+	pDupeStatus:Set({
+		Title   = "выбран (ближайший)",
+		Content = "[#"..bestIdx.."] "..best.obj.Name
+			.."\nдист: "..math.floor(bestDist).."m"
+			.."\neid: "..best.eid
+	})
+	local lines = {}
+	for i, d in ipairs(groundItems) do
+		local dist = hrp and math.floor((itemPos(d) - hrp.Position).Magnitude) or 0
+		local sel = (i == bestIdx) and " ◄ ВЫБРАН" or ""
+		lines[i] = ("[%d] %s  %dm%s"):format(i, d.obj.Name, dist, sel)
+	end
+	pDupeList:Set({Title="items ("..#groundItems..")", Content=table.concat(lines,"\n")})
+end})
+
+TabDupe:CreateDivider()
+
+TabDupe:CreateSlider({
+	Name="spam count", Range={50,500}, Increment=50, Suffix="x",
+	CurrentValue=200, Flag="dupeSpam",
+	Callback=function(v) dupeSpamCount=v end
+})
+
+TabDupe:CreateDivider()
+
+TabDupe:CreateButton({Name="🎯 DUPE выбранный", Callback=function()
+	if dupeRunning then
+		pDupeStatus:Set({Title="status", Content="уже запущен!"})
+		return
+	end
+	if not dupeSelected then
+		pDupeStatus:Set({Title="status", Content="сначала выбери предмет"})
+		return
+	end
+	if not dupeSelected.obj.Parent then
+		pDupeStatus:Set({Title="status", Content="предмет исчез\nscan заново"})
+		dupeSelected = nil
+		return
+	end
+	if not hrp then return end
+
+	dupeRunning = true
+	local d = dupeSelected
+	local name = d.obj.Name
+
+	pDupeStatus:Set({Title="dupe", Content=name.."\nспам: "..dupeSpamCount.."x"})
+
+	task.spawn(function()
+		local savedCF = hrp.CFrame
+		hrp.CFrame = CFrame.new(itemPos(d) + Vector3.new(0, 2, 0))
+		task.wait(0.05)
+
+		local sent = 0
+		for i = 1, dupeSpamCount do
+			local ok = pcall(remInteract.FireServer, remInteract, d.sE)
+			if ok then sent+=1 end
+		end
+
+		task.wait(0.15)
+		local disappeared = not d.obj.Parent
+		if hrp and hrp.Parent then hrp.CFrame = savedCF end
+		dupeRunning = false
+
+		pDupeStatus:Set({
+			Title   = disappeared and "✓ взят" or "✗ не сработало",
+			Content = name.."\nотправлено: "..sent.." пакетов"
+				..(disappeared and "\nпроверь инвентарь!" or "\nпопробуй больше spam count")
+		})
+	end)
+end})
+
+TabDupe:CreateButton({Name="💀 dupe ALL items", Callback=function()
+	if dupeRunning then return end
+	itemStamp = 0
+	groundItems = scanItems()
+	if #groundItems == 0 then
+		pDupeStatus:Set({Title="status", Content="нет предметов"})
+		return
+	end
+	if not hrp then return end
+
+	dupeRunning = true
+	task.spawn(function()
+		local savedCF = hrp.CFrame
+		local total = #groundItems
+		local success = 0
+
+		for idx, d in ipairs(groundItems) do
+			if not dupeRunning then break end
+			if not d.obj.Parent then continue end
+
+			pDupeStatus:Set({Title="dupe all", Content="["..idx.."/"..total.."] "..d.obj.Name})
+
+			hrp.CFrame = CFrame.new(itemPos(d) + Vector3.new(0, 2, 0))
+			task.wait(0.05)
+
+			for i = 1, dupeSpamCount do
+				pcall(remInteract.FireServer, remInteract, d.sE)
+			end
+
+			task.wait(0.1)
+			if not d.obj.Parent then success+=1 end
+		end
+
+		if hrp and hrp.Parent then hrp.CFrame = savedCF end
+		dupeRunning = false
+		pDupeStatus:Set({
+			Title   = "dupe all done",
+			Content = ("взято: %d/%d\nпроверь инвентарь"):format(success, total)
+		})
+	end)
+end})
+
+TabDupe:CreateButton({Name="⏹ стоп", Callback=function()
+	dupeRunning = false
+	pDupeStatus:Set({Title="status", Content="остановлен"})
+end})
+
+-- ============ TAB: ENTITIES ============
+local TabEnt      = Win:CreateTab("Entities", 4483362458)
+local pEntStatus  = TabEnt:CreateParagraph({Title="info",  Content="idle"})
+local pEntList    = TabEnt:CreateParagraph({Title="list",  Content="scan first"})
+local pHoverStatus= TabEnt:CreateParagraph({Title="hover", Content="off"})
+
+local hoverOffsetVal = 15
+local hoverCamVal    = true
+
+TabEnt:CreateSlider({
+	Name="offset Y above target",
+	Range={0,50}, Increment=1, Suffix="st",
+	CurrentValue=hoverOffsetVal, Flag="hoverOffY",
+	Callback=function(v)
+		hoverOffsetVal=v
+		if hoverActive then hoverOffsetY=v end
+	end
+})
+
+TabEnt:CreateSlider({
+	Name="fly speed",
+	Range={10,200}, Increment=10, Suffix="sp",
+	CurrentValue=flySpeed, Flag="hoverFlySpeed",
+	Callback=function(v) flySpeed=v end
+})
+
+TabEnt:CreateToggle({
+	Name="camera look at target",
+	CurrentValue=hoverCamVal, Flag="hoverCam",
+	Callback=function(v)
+		hoverCamVal=v
+		if not v then stopCamLock() end
+	end
+})
+
+TabEnt:CreateParagraph({
+	Title="управление в hover",
+	Content="WASD — летать вокруг моба\nSpace — вверх\nLCtrl/LShift — вниз\nОтпусти — вернёшься над моба"
+})
+
+TabEnt:CreateDivider()
+
+local hoverEidInput=0
+TabEnt:CreateInput({
+	Name="target entity id", PlaceholderText="eid...",
+	RemoveTextAfterFocusLost=false,
+	Callback=function(t) hoverEidInput=tonumber(t) or 0 end
+})
+
+TabEnt:CreateButton({Name="hover by eid", Callback=function()
+	if hoverEidInput==0 then
+		pHoverStatus:Set({Title="hover",Content="enter eid first"})
+		return
+	end
+	local model=getModelFromEid(hoverEidInput)
+	if not model then
+		pHoverStatus:Set({Title="hover",Content="no model for eid "..hoverEidInput})
+		return
+	end
+	startHover({eid=hoverEidInput,model=model}, hoverOffsetVal, hoverCamVal)
+	pHoverStatus:Set({Title="hover",Content="hovering eid:"..hoverEidInput.."  Y:+"..hoverOffsetVal})
+end})
+
+TabEnt:CreateButton({Name="hover nearest monster", Callback=function()
+	local targets=scanTargetable()
+	local best,bestDist=nil,math.huge
+	for _,d in ipairs(targets) do
+		if not d.isPlayer then
+			local pos=entityPos(d.eid)
+			if pos and hrp then
+				local dist=(pos-hrp.Position).Magnitude
+				if dist<bestDist then bestDist=dist;best=d end
+			end
+		end
+	end
+	if not best then pHoverStatus:Set({Title="hover",Content="no monsters"}); return end
+	startHover(best, hoverOffsetVal, hoverCamVal)
+	pHoverStatus:Set({Title="hover",Content="hovering "..(best.model and best.model.Name or "?").."  Y:+"..hoverOffsetVal})
+end})
+
+TabEnt:CreateButton({Name="hover nearest player", Callback=function()
+	local targets=scanTargetable()
+	local best,bestDist=nil,math.huge
+	for _,d in ipairs(targets) do
+		if d.isPlayer then
+			local pos=entityPos(d.eid)
+			if pos and hrp then
+				local dist=(pos-hrp.Position).Magnitude
+				if dist<bestDist then bestDist=dist;best=d end
+			end
+		end
+	end
+	if not best then pHoverStatus:Set({Title="hover",Content="no players"}); return end
+	startHover(best, hoverOffsetVal, hoverCamVal)
+	pHoverStatus:Set({Title="hover",Content="hovering "..(best.model and best.model.Name or "?").."  Y:+"..hoverOffsetVal})
+end})
+
+TabEnt:CreateButton({Name="stop hover", Callback=function()
+	stopHover()
+	pHoverStatus:Set({Title="hover",Content="off"})
+end})
+
+TabEnt:CreateDivider()
+
+TabEnt:CreateButton({Name="scan targetable", Callback=function()
+	local res=scanTargetable()
+	if #res==0 then pEntList:Set({Title="targetable (0)",Content="none"}); return end
+	local lines={}
+	for i,d in ipairs(res) do
+		local pos=entityPos(d.eid)
+		local dist=(hrp and pos) and math.floor((pos-hrp.Position).Magnitude) or 0
+		local hpStr=d.hp and ("  hp:"..(d.hp.current or d.hp.value or "?")) or ""
+		local tag=d.isPlayer and "[P]" or "[M]"
+		lines[i]=("%s eid:%d  %s  %dm%s"):format(tag,d.eid,d.model and d.model.Name or "?",dist,hpStr)
+		if i>=20 then lines[i+1]="... +"..(#res-20).." more"; break end
+	end
+	pEntList:Set({Title="targetable ("..#res..")",Content=table.concat(lines,"\n")})
+	pEntStatus:Set({Title="info",Content=#res.." targets"})
+end})
+
+TabEnt:CreateDivider()
+
+local pShardStatus=TabEnt:CreateParagraph({Title="shards",Content="idle"})
+
+TabEnt:CreateButton({Name="scan shards", Callback=function()
+	local res=scanShards()
+	local wp,np=0,0
+	for _,d in ipairs(res) do if d.part then wp+=1 else np+=1 end end
+	pShardStatus:Set({
+		Title="shards ("..#res..")",
+		Content=("total: %d\nlocated: %d\nnot located: %d"):format(#res,wp,np)
+	})
+end})
+
+TabEnt:CreateButton({Name="collect all shards", Callback=function()
+	collectAllShards(pShardStatus)
+end})
+
+TabEnt:CreateDivider()
+
+TabEnt:CreateButton({Name="scan zones", Callback=function()
+	local res=scanZones()
+	if #res==0 then pEntList:Set({Title="zones (0)",Content="none"}); return end
+	local lines={}
+	for i,d in ipairs(res) do
+		local pos=entityPos(d.eid)
+		local dist=(hrp and pos) and math.floor((pos-hrp.Position).Magnitude) or 0
+		lines[i]=("[%d] %s  %dm"):format(d.eid,d.model and d.model.Name or "zone",dist)
+	end
+	pEntList:Set({Title="zones ("..#res..")",Content=table.concat(lines,"\n")})
+end})
+
+TabEnt:CreateButton({Name="tp nearest zone", Callback=function()
+	local res=scanZones()
+	local best,bestDist=nil,math.huge
+	for _,d in ipairs(res) do
+		local pos=entityPos(d.eid)
+		if pos and hrp then
+			local dist=(pos-hrp.Position).Magnitude
+			if dist<bestDist then bestDist=dist;best=d end
+		end
+	end
+	if best and best.model then
+		tpToModel(best.model,3)
+		pEntStatus:Set({Title="info",Content="tp → zone "..best.eid})
+	end
+end})
+
+TabEnt:CreateDivider()
+
+TabEnt:CreateButton({Name="activate all checkpoints", Callback=function()
+	local res=scanCheckpoints()
+	if #res==0 then pEntStatus:Set({Title="info",Content="no checkpoints"}); return end
+	task.spawn(function()
+		for _,d in ipairs(res) do
+			interactEntity(d.sE,nil)
+			task.wait(0.1)
+		end
+		pEntStatus:Set({Title="info",Content="activated "..#res})
+	end)
+end})
+
+-- ============ TAB: INSPECT ============
+local TabInspect = Win:CreateTab("Inspect", 4483362458)
+local pInspectInfo = TabInspect:CreateParagraph({Title="info", Content="idle"})
+local pInspectList = TabInspect:CreateParagraph({Title="data", Content="..."})
+
+TabInspect:CreateButton({Name="scan weapons", Callback=function()
+	local res=scanWeapons()
+	if #res==0 then pInspectList:Set({Title="weapons (0)",Content="none found"}); return end
+	local lines={}
+	for _,d in ipairs(res) do
+		lines[#lines+1]=d.owner.." → "..d.item.."  (eid:"..d.eid..")"
+	end
+	pInspectList:Set({Title="weapons ("..#res..")",Content=table.concat(lines,"\n")})
+	pInspectInfo:Set({Title="info",Content=#res.." weapons"})
+end})
+
+TabInspect:CreateButton({Name="copy weapons", Callback=function()
+	local res=scanWeapons()
+	if #res==0 then pInspectInfo:Set({Title="info",Content="nothing"}); return end
+	local lines={"=== weapons ===","time: "..os.date("%Y-%m-%d %H:%M:%S"),""}
+	for _,d in ipairs(res) do lines[#lines+1]=d.owner.." → "..d.item.."  (eid:"..d.eid..")" end
+	local ok,err=pcall(setclipboard,table.concat(lines,"\n"))
+	pInspectInfo:Set({Title="info",Content=ok and "copied!" or "err: "..tostring(err)})
+end})
+
+TabInspect:CreateDivider()
+
+local inspectEid=0
+TabInspect:CreateInput({
+	Name="entity id", PlaceholderText="eid...",
+	RemoveTextAfterFocusLost=false,
+	Callback=function(t) inspectEid=tonumber(t) or 0 end
+})
+
+TabInspect:CreateButton({Name="dump components", Callback=function()
+	if inspectEid==0 then return end
+	local world=getWorld()
+	local lines={}
+	for compName,comp in pairs(Components) do
+		local ok,val=pcall(world.get,world,inspectEid,comp)
+		if ok and val~=nil then
+			local fields=""
+			if type(val)=="table" then
+				local parts={}
+				for k,v in pairs(val) do
+					if type(v)~="table" and type(v)~="userdata" then
+						parts[#parts+1]=tostring(k).."="..tostring(v)
+					elseif type(v)=="userdata" then
+						local ok2,n=pcall(function() return v.Name end)
+						parts[#parts+1]=tostring(k).."=["..(ok2 and n or "ud").."]"
+					end
+				end
+				if #parts>0 then fields=" {"..table.concat(parts,", ").."}" end
+			end
+			lines[#lines+1]=compName..fields
+		end
+	end
+	if #lines==0 then
+		pInspectList:Set({Title="eid "..inspectEid,Content="not found"})
+	else
+		pInspectList:Set({Title="eid "..inspectEid.." ("..#lines..")",Content=table.concat(lines,"\n")})
+	end
+end})
+
+TabInspect:CreateButton({Name="copy components", Callback=function()
+	if inspectEid==0 then return end
+	local world=getWorld()
+	local lines={"=== eid "..inspectEid.." ===","time: "..os.date("%Y-%m-%d %H:%M:%S"),""}
+	for compName,comp in pairs(Components) do
+		local ok,val=pcall(world.get,world,inspectEid,comp)
+		if ok and val~=nil then
+			local fields=""
+			if type(val)=="table" then
+				local parts={}
+				for k,v in pairs(val) do
+					if type(v)~="table" and type(v)~="userdata" then
+						parts[#parts+1]=tostring(k).."="..tostring(v)
+					elseif type(v)=="userdata" then
+						local ok2,n=pcall(function() return v.Name end)
+						parts[#parts+1]=tostring(k).."=["..(ok2 and n or "ud").."]"
+					end
+				end
+				if #parts>0 then fields=" {"..table.concat(parts,", ").."}" end
+			end
+			lines[#lines+1]=compName..fields
+		end
+	end
+	local ok,err=pcall(setclipboard,table.concat(lines,"\n"))
+	pInspectInfo:Set({Title="info",Content=ok and "copied!" or "err: "..tostring(err)})
+end})
+
+-- ============ TAB: MISC ============
+local TabMisc = Win:CreateTab("Misc", 4483362458)
+
+TabMisc:CreateButton({Name="force rescan items", Callback=function()
+	itemStamp=0
+	local items=scanItems()
+	Rayfield:Notify({Title="Hub TDR",Content="found "..#items.." items",Duration=3,Image=4483362458})
+end})
+
+TabMisc:CreateParagraph({
+	Title="keybinds",
+	Content="RightShift — stop hover + close ui\nF — не используется (hover через кнопки)"
+})
+
+--------------------------------------------------
+-- LOOPS
+--------------------------------------------------
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		if hoverActive and hoverTarget then
+			pHoverStatus:Set({
+				Title   = "hover ✈",
+				Content = "eid:"..hoverTarget.eid
+					.."\nY:+"..hoverOffsetY
+					.."\nspeed:"..flySpeed
+					.."\nWASD для полёта"
+			})
+		end
+	end
+end)
+
+task.spawn(function()
+	while true do task.wait(5); itemStamp=0; scanItems() end
+end)
+
+lp.CharacterAdded:Connect(function(c)
+	bindChar(c)
+	if hoverActive then
+		task.wait(1)
+		cleanupFly()
+		local t = hoverTarget
+		if t then startHover(t, hoverOffsetY, hoverCamLock) end
+	end
+end)
+
+UserInputService.InputBegan:Connect(function(inp, gp)
+	if gp then return end
+	if inp.KeyCode == Enum.KeyCode.RightShift then
+		stopHover()
+		Rayfield:Destroy()
+	end
+end)
+
+print("hub tdr loaded")end);task.spawn(function() while true do task.wait(5);itemStamp=0;scanItems();end end);UserInputService.InputBegan:Connect(function(inp,gp) if gp then return;end if (inp.KeyCode==Enum.KeyCode.RightShift) then stopHover();Rayfield:Destroy();end end);print("hub tdr loaded"); end
