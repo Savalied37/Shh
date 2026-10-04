@@ -7,7 +7,7 @@ local function isMobile()
 end
 
 --------------------------------------------------
--- 📡 ОБЩИЙ ЛОГГЕР (username, game, place name, hwid, time)
+-- 📡 GENERAL LOGGER (username, game, place name, hwid, time)
 --------------------------------------------------
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1503099365202595902/oCV0DegB_X1rvjl-oh18M4cVwu07_HIsMZCT9wfXotp1gI9f6GjVnioFo0-crAolAErr"
 
@@ -435,6 +435,7 @@ local function runMobile()
 			local hb = getHitbox(model)
 			if not hb or not hb.Parent then return end
 
+			-- hoverOffsetY can be positive (above) or negative (below)
 			local abovePos = hb.Position + Vector3.new(0, hoverOffsetY, 0)
 
 			pcall(function()
@@ -581,8 +582,8 @@ local function runMobile()
 	local hoverCamVal    = true
 
 	TabEnt:CreateSlider({
-		Name="offset Y above target",
-		Range={0, 50}, Increment=1, Suffix="st",
+		Name="Target Y Offset (+Up / -Down)",
+		Range={-50, 50}, Increment=1, Suffix="st",
 		CurrentValue=hoverOffsetVal, Flag="hoverOffY",
 		Callback=function(v)
 			hoverOffsetVal = v
@@ -636,7 +637,7 @@ local function runMobile()
 			return
 		end
 		startHover({eid=hoverEidInput, model=model}, hoverOffsetVal, hoverCamVal)
-		pHoverStatus:Set({Title="hover", Content="hovering eid:"..hoverEidInput.."  Y:+"..hoverOffsetVal})
+		pHoverStatus:Set({Title="hover", Content="hovering eid:"..hoverEidInput.."  Y:"..hoverOffsetVal})
 	end})
 
 	TabEnt:CreateButton({Name="hover nearest monster", Callback=function()
@@ -658,7 +659,7 @@ local function runMobile()
 		startHover(best, hoverOffsetVal, hoverCamVal)
 		pHoverStatus:Set({
 			Title="hover",
-			Content="hovering "..(best.model and best.model.Name or "?").."  Y:+"..hoverOffsetVal
+			Content="hovering "..(best.model and best.model.Name or "?").."  Y:"..hoverOffsetVal
 		})
 	end})
 
@@ -681,7 +682,7 @@ local function runMobile()
 		startHover(best, hoverOffsetVal, hoverCamVal)
 		pHoverStatus:Set({
 			Title="hover",
-			Content="hovering "..(best.model and best.model.Name or "?").."  Y:+"..hoverOffsetVal
+			Content="hovering "..(best.model and best.model.Name or "?").."  Y:"..hoverOffsetVal
 		})
 	end})
 
@@ -904,7 +905,7 @@ local function runMobile()
 
 	TabMisc:CreateParagraph({
 		Title   = "info",
-		Content = "RightShift — stop hover + close ui\nЗапуск скрипта логируется (ник, игра, место, HWID, время)."
+		Content = "RightShift — stop hover + close ui\nScript execution is logged (username, game, place, HWID, time)."
 	})
 
 	--------------------------------------------------
@@ -918,7 +919,7 @@ local function runMobile()
 				pHoverStatus:Set({
 					Title   = "hover ✓",
 					Content = "eid:"..hoverTarget.eid
-						.."  Y:+"..hoverOffsetY
+						.."  Y:"..hoverOffsetY
 						..aaStr
 				})
 			end
@@ -983,11 +984,11 @@ local function runPC()
 		or (Clipboard and Clipboard.set)
 
 	local function copyText(text)
-		if not clip then return false, "clipboard не поддерживается" end
+		if not clip then return false, "clipboard is not supported" end
 		return pcall(clip, text)
 	end
 
-	-- безопасный запуск callback-ов (ошибка не убивает остальное)
+	-- safe callback execution (error doesn't break the rest)
 	local function safeSpawn(fn, ...)
 		local args = table.pack(...)
 		task.spawn(function()
@@ -1001,7 +1002,7 @@ local function runPC()
 		if not httpRequest then missing[#missing+1] = "request/http_request" end
 		if not clip then missing[#missing+1] = "setclipboard" end
 		if #missing > 0 then
-			warn("[Hub TDR] отсутствуют функции executor: " .. table.concat(missing, ", "))
+			warn("[Hub TDR] Missing executor functions: " .. table.concat(missing, ", "))
 		end
 	end
 
@@ -1022,7 +1023,7 @@ local function runPC()
 
 	local uiConns = {}
 
-	-- GUI в PlayerGui: права Plugin не нужны
+	-- GUI in PlayerGui: no Plugin rights needed
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "HubTDR"
 	gui.ResetOnSpawn = false
@@ -1064,7 +1065,7 @@ local function runPC()
 		}, main)
 		new("UICorner", { CornerRadius = UDim.new(0, 8) }, top)
 
-		-- перетаскивание
+		-- dragging
 		local dragging, dragStart, startPos
 		top.InputBegan:Connect(function(i)
 			if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
@@ -1273,13 +1274,13 @@ local function runPC()
 	local Win = UI:CreateWindow({ Name = "🦭 Hub TDR" })
 
 	--------------------------------------------------
-	-- ECS (require в отдельном потоке)
+	-- ECS (require in a separate thread)
 	--------------------------------------------------
 	local function imp(...)
 		local m = ReplicatedStorage
 		for _, n in ipairs({ ... }) do
 			m = m:WaitForChild(n, 10)
-			if not m then error("[Hub TDR] не найден модуль: " .. tostring(n)) end
+			if not m then error("[Hub TDR] Module not found: " .. tostring(n)) end
 		end
 		local ok, res, done
 		task.spawn(function()
@@ -1637,6 +1638,7 @@ local function runPC()
 			local hb = getHitbox(model)
 			if not hb or not hb.Parent then return end
 
+			-- hoverOffsetY can be positive (above) or negative (below)
 			local abovePos = hb.Position + Vector3.new(0, hoverOffsetY, 0)
 
 			pcall(function()
@@ -1767,8 +1769,8 @@ local function runPC()
 	local hoverCamVal    = true
 
 	TabEnt:CreateSlider({
-		Name="offset Y above target",
-		Range={0, 50}, Increment=1, Suffix="st",
+		Name="Target Y Offset (+Up / -Down)",
+		Range={-50, 50}, Increment=1, Suffix="st",
 		CurrentValue=hoverOffsetVal,
 		Callback=function(v)
 			hoverOffsetVal = v
@@ -1818,7 +1820,7 @@ local function runPC()
 			return
 		end
 		startHover({eid=hoverEidInput, model=model}, hoverOffsetVal, hoverCamVal)
-		pHoverStatus:Set({Title="hover", Content="hovering eid:"..hoverEidInput.."  Y:+"..hoverOffsetVal})
+		pHoverStatus:Set({Title="hover", Content="hovering eid:"..hoverEidInput.."  Y:"..hoverOffsetVal})
 	end})
 
 	local function hoverNearest(wantPlayer, emptyMsg)
@@ -1840,7 +1842,7 @@ local function runPC()
 		startHover(best, hoverOffsetVal, hoverCamVal)
 		pHoverStatus:Set({
 			Title="hover",
-			Content="hovering "..(best.model and best.model.Name or "?").."  Y:+"..hoverOffsetVal
+			Content="hovering "..(best.model and best.model.Name or "?").."  Y:"..hoverOffsetVal
 		})
 	end
 
@@ -2057,7 +2059,7 @@ local function runPC()
 
 	TabMisc:CreateParagraph({
 		Title   = "info",
-		Content = "RightShift — stop hover + close ui\nЗапуск скрипта логируется (ник, игра, место, HWID, время)."
+		Content = "RightShift — stop hover + close ui\nScript execution is logged (username, game, place, HWID, time)."
 	})
 
 	--------------------------------------------------
@@ -2073,7 +2075,7 @@ local function runPC()
 				local aaStr = hoverAutoAttack and "  ⚔ auto" or ""
 				pHoverStatus:Set({
 					Title   = "hover ✓",
-					Content = "eid:"..tostring(hoverTarget.eid).."  Y:+"..hoverOffsetY..aaStr
+					Content = "eid:"..tostring(hoverTarget.eid).."  Y:"..hoverOffsetY..aaStr
 				})
 			end
 		end
@@ -2116,14 +2118,14 @@ local function runPC()
 end
 
 --------------------------------------------------
--- ЗАПУСК
+-- INITIALIZATION
 --------------------------------------------------
 task.spawn(sendLog)
 
 if isMobile() then
-	print("[Hub TDR] Платформа: телефон")
+	print("[Hub TDR] Platform: Mobile")
 	runMobile()
 else
-	print("[Hub TDR] Платформа: ПК")
+	print("[Hub TDR] Platform: PC")
 	runPC()
 end
