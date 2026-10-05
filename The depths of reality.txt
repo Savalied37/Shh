@@ -481,6 +481,46 @@ local function runMobile()
 	local TabItems    = Win:CreateTab("Items", 4483362458)
 	local pItemStatus = TabItems:CreateParagraph({Title="info", Content="idle"})
 
+	--------------------------------------------------
+	-- AUTO COLLECT TOGGLE
+	--------------------------------------------------
+	local autoCollectEnabled = false
+	local autoCollectRunning = false
+
+	local function autoCollectLoop()
+		if autoCollectRunning then return end
+		autoCollectRunning = true
+		task.spawn(function()
+			while autoCollectEnabled do
+				local items = scanItems()
+				for _, d in ipairs(items) do
+					if not autoCollectEnabled then break end
+					if d.obj.Parent then
+						local done = false
+						grabItem(d, function() done = true end)
+						while not done and autoCollectEnabled do task.wait(0.05) end
+						task.wait(0.1)
+					end
+				end
+				task.wait(1)
+			end
+			autoCollectRunning = false
+		end)
+	end
+
+	TabItems:CreateToggle({
+		Name="auto collect all items",
+		CurrentValue=false,
+		Flag="autoCollectItems",
+		Callback=function(v)
+			autoCollectEnabled = v
+			pItemStatus:Set({Title="info", Content = v and "auto collect: ON" or "auto collect: OFF"})
+			if v then autoCollectLoop() end
+		end
+	})
+
+	TabItems:CreateDivider()
+
 	TabItems:CreateButton({Name="scan", Callback=function()
 		itemStamp = 0
 		local res = scanItems()
@@ -905,7 +945,7 @@ local function runMobile()
 
 	TabMisc:CreateParagraph({
 		Title   = "info",
-		Content = "RightShift — stop hover + close ui\nScript execution is logged (username, game, place, HWID, time)."
+		Content = "RightShift — stop hover + auto collect + close ui\nScript execution is logged (username, game, place, HWID, time)."
 	})
 
 	--------------------------------------------------
@@ -946,6 +986,7 @@ local function runMobile()
 	UserInputService.InputBegan:Connect(function(inp, gp)
 		if gp then return end
 		if inp.KeyCode == Enum.KeyCode.RightShift then
+			autoCollectEnabled = false
 			stopHover()
 			Rayfield:Destroy()
 		end
@@ -1670,6 +1711,45 @@ local function runPC()
 	local TabItems    = Win:CreateTab("Items")
 	local pItemStatus = TabItems:CreateParagraph({Title="info", Content="idle"})
 
+	--------------------------------------------------
+	-- AUTO COLLECT TOGGLE
+	--------------------------------------------------
+	local autoCollectEnabled = false
+	local autoCollectRunning = false
+
+	local function autoCollectLoop()
+		if autoCollectRunning then return end
+		autoCollectRunning = true
+		task.spawn(function()
+			while autoCollectEnabled do
+				local items = scanItems()
+				for _, d in ipairs(items) do
+					if not autoCollectEnabled then break end
+					if d.obj.Parent then
+						local done = false
+						grabItem(d, function() done = true end)
+						while not done and autoCollectEnabled do task.wait(0.05) end
+						task.wait(0.1)
+					end
+				end
+				task.wait(1)
+			end
+			autoCollectRunning = false
+		end)
+	end
+
+	TabItems:CreateToggle({
+		Name="auto collect all items",
+		CurrentValue=false,
+		Callback=function(v)
+			autoCollectEnabled = v
+			pItemStatus:Set({Title="info", Content = v and "auto collect: ON" or "auto collect: OFF"})
+			if v then autoCollectLoop() end
+		end
+	})
+
+	TabItems:CreateDivider()
+
 	TabItems:CreateButton({Name="scan", Callback=function()
 		itemStamp = 0
 		local res = scanItems()
@@ -2059,7 +2139,7 @@ local function runPC()
 
 	TabMisc:CreateParagraph({
 		Title   = "info",
-		Content = "RightShift — stop hover + close ui\nScript execution is logged (username, game, place, HWID, time)."
+		Content = "RightShift — stop hover + auto collect + close ui\nScript execution is logged (username, game, place, HWID, time)."
 	})
 
 	--------------------------------------------------
@@ -2100,6 +2180,7 @@ local function runPC()
 
 	local function shutdown()
 		alive = false
+		autoCollectEnabled = false
 		stopHover()
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 		pcall(function() UI:Destroy() end)
