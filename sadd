@@ -1,0 +1,355 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Inventory Manager",
+    Icon = 0,
+    LoadingTitle = "Loading...",
+    LoadingSubtitle = "Please wait",
+    Theme = "Dark",
+    ConfigurationSaving = { Enabled = false }
+})
+
+local MainTab = Window:CreateTab("Main", 4483362458)
+
+local Config = {
+    ChestSlot = 1,
+    InventorySlot = 1,
+}
+
+local ChestItemsData = {}
+local EmptyInventorySlots = {}
+
+-- ===== REMOTE =====
+local function GetRemote()
+    local success, remote = pcall(function()
+        return game:GetService("ReplicatedStorage")
+            :WaitForChild("rbxts_include", 5)
+            :WaitForChild("node_modules", 5)
+            :WaitForChild("@rbxts", 5)
+            :WaitForChild("remo", 5)
+            :WaitForChild("src", 5)
+            :WaitForChild("container", 5)
+            :WaitForChild("player.inventory.move", 5)
+    end)
+    return success and remote or nil
+end
+
+-- ===== CHEST (SlotGrid) =====
+local function GetChestSlotGrid()
+    local success, slotGrid = pcall(function()
+        local player = game:GetService("Players").LocalPlayer
+        local gui = player:WaitForChild("PlayerGui")
+        return gui:WaitForChild("Inventory")
+            :WaitForChild("LayerContent")
+            :WaitForChild("InventoryScreen")
+            :WaitForChild("RightPanel")
+            :WaitForChild("PanelContainer")
+            :WaitForChild("InventorySwapPanel")
+            :WaitForChild("PanelContainer")
+            :WaitForChild("Panel3")
+            :WaitForChild("Crate")
+            :WaitForChild("LabeledSlotGrid")
+            :WaitForChild("SlotGrid")
+    end)
+    return success and slotGrid or nil
+end
+
+-- ===== INVENTORY (SlotGrid) =====
+local function GetInventorySlotGrid()
+    local success, slotGrid = pcall(function()
+        local player = game:GetService("Players").LocalPlayer
+        local gui = player:WaitForChild("PlayerGui")
+        return gui:WaitForChild("Inventory")
+            :WaitForChild("LayerContent")
+            :WaitForChild("InventoryScreen")
+            :WaitForChild("LeftPanel")
+            :WaitForChild("Inventory")
+            :WaitForChild("InventoryGroups")
+            :WaitForChild("LabeledSlotGrid")
+            :WaitForChild("SlotGrid")
+    end)
+    return success and slotGrid or nil
+end
+
+-- ===== СКАНЕР СУНДУКА =====
+local function ScanChestItems()
+    local slotGrid = GetChestSlotGrid()
+    ChestItemsData = {}
+    
+    if not slotGrid then
+        Rayfield:Notify({
+            Title = "Ошибка",
+            Content = "Chest SlotGrid не найден!",
+            Duration = 3,
+        })
+        return {}
+    end
+    
+    local results = {}
+    
+    for _, slot in ipairs(slotGrid:GetChildren()) do
+        local slotNumber = slot.Name:match("^Slot(%d+)$")
+        
+        if slotNumber then
+            local item = slot:FindFirstChild("Item")
+            if item then
+                local itemModel = item:FindFirstChild("ItemModel")
+                if itemModel then
+                    local iconViewport = itemModel:FindFirstChild("ItemIconViewport")
+                    if iconViewport then
+                        local itemName = nil
+                        
+                        for _, child in ipairs(iconViewport:GetChildren()) do
+                            if not child:IsA("Camera") and child.Name ~= "WorldModel" then
+                                itemName = child.Name
+                                break
+                            end
+                        end
+                        
+                        if itemName then
+                            ChestItemsData[tonumber(slotNumber)] = itemName
+                            table.insert(results, "Slot " .. slotNumber .. " - " .. itemName)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    table.sort(results, function(a, b)
+        local numA = tonumber(a:match("Slot (%d+)"))
+        local numB = tonumber(b:match("Slot (%d+)"))
+        return numA < numB
+    end)
+    
+    return results
+end
+
+-- ===== СКАНЕР ИНВЕНТАРЯ (пустые слоты) =====
+local function ScanEmptyInventorySlots()
+    local slotGrid = GetInventorySlotGrid()
+    EmptyInventorySlots = {}
+    
+    if not slotGrid then
+        Rayfield:Notify({
+            Title = "Ошибка",
+            Content = "Inventory SlotGrid не найден!",
+            Duration = 3,
+        })
+        return {}
+    end
+    
+    local results = {}
+    
+    for _, slot in ipairs(slotGrid:GetChildren()) do
+        local slotNumber = slot.Name:match("^Slot(%d+)$")
+        
+        if slotNumber then
+            local nameLabel = slot:FindFirstChild("NameLabel")
+            
+            if nameLabel then
+                local text = nameLabel.Text
+                
+                -- Проверяем пустой ли слот
+                if text == "" or text == nil then
+                    table.insert(EmptyInventorySlots, tonumber(slotNumber))
+                    table.insert(results, "Slot " .. slotNumber .. " (Пусто)")
+                end
+            end
+        end
+    end
+    
+    table.sort(results, function(a, b)
+        local numA = tonumber(a:match("Slot (%d+)"))
+        local numB = tonumber(b:match("Slot (%d+)"))
+        return numA < numB
+    end)
+    
+    return results
+end
+
+-- ===== MOVE ITEM =====
+local function MoveItem(chestIndex, inventoryIndex)
+    local remote = GetRemote()
+    
+    if not remote then
+        Rayfield:Notify({
+            Title = "Ошибка",
+            Content = "Не удалось найти Remote путь!",
+            Duration = 3,
+        })
+        return
+    end
+    
+    local args = {
+        { index = chestIndex, container = "external" },
+        { index = inventoryIndex, container = "inventory" }
+    }
+    
+    local success, err = pcall(function()
+        remote:FireServer(table.unpack(args))
+    end)
+    
+    if success then
+        Rayfield:Notify({
+            Title = "Успех",
+            Content = "Перемещено: Chest[" .. chestIndex .. "] -> Inv[" .. inventoryIndex .. "]",
+            Duration = 2,
+        })
+    else
+        Rayfield:Notify({
+            Title = "Ошибка",
+            Content = tostring(err),
+            Duration = 3,
+        })
+    end
+end
+
+-- ===== UI =====
+
+MainTab:CreateLabel("📦 Сканер сундука")
+
+local ChestDropdown = MainTab:CreateDropdown({
+    Name = "Предметы в сундуке",
+    Options = {"Нажмите Сканировать"},
+    CurrentOption = {"Нажмите Сканировать"},
+    MultipleOptions = false,
+    Flag = "ChestDropdown",
+    Callback = function(Option)
+        local selected = Option[1]
+        local slotNum = selected:match("Slot (%d+)")
+        if slotNum then
+            Config.ChestSlot = tonumber(slotNum)
+            Rayfield:Notify({
+                Title = "Выбрано",
+                Content = "Слот сундука: " .. slotNum,
+                Duration = 2,
+            })
+        end
+    end,
+})
+
+MainTab:CreateButton({
+    Name = "🔍 Сканировать сундук",
+    Callback = function()
+        local items = ScanChestItems()
+        
+        if #items == 0 then
+            Rayfield:Notify({
+                Title = "Пусто",
+                Content = "Предметы не найдены в сундуке",
+                Duration = 2,
+            })
+            return
+        end
+        
+        pcall(function()
+            ChestDropdown:Refresh(items, true)
+        end)
+        
+        print("=== ПРЕДМЕТЫ В СУНДУКЕ ===")
+        for _, item in ipairs(items) do
+            print(item)
+        end
+        
+        Rayfield:Notify({
+            Title = "Готово",
+            Content = "Найдено предметов: " .. #items,
+            Duration = 3,
+        })
+    end,
+})
+
+MainTab:CreateDivider()
+MainTab:CreateLabel("🎒 Сканер инвентаря (пустые слоты)")
+
+local InventoryDropdown = MainTab:CreateDropdown({
+    Name = "Пустые слоты инвентаря",
+    Options = {"Нажмите Сканировать"},
+    CurrentOption = {"Нажмите Сканировать"},
+    MultipleOptions = false,
+    Flag = "InvDropdown",
+    Callback = function(Option)
+        local selected = Option[1]
+        local slotNum = selected:match("Slot (%d+)")
+        if slotNum then
+            Config.InventorySlot = tonumber(slotNum)
+            Rayfield:Notify({
+                Title = "Выбрано",
+                Content = "Слот инвентаря: " .. slotNum,
+                Duration = 2,
+            })
+        end
+    end,
+})
+
+MainTab:CreateButton({
+    Name = "🔍 Сканировать пустые слоты инвентаря",
+    Callback = function()
+        local items = ScanEmptyInventorySlots()
+        
+        if #items == 0 then
+            Rayfield:Notify({
+                Title = "Внимание",
+                Content = "Пустых слотов не найдено (инвентарь полон)",
+                Duration = 3,
+            })
+            return
+        end
+        
+        pcall(function()
+            InventoryDropdown:Refresh(items, true)
+        end)
+        
+        print("=== ПУСТЫЕ СЛОТЫ ИНВЕНТАРЯ ===")
+        for _, item in ipairs(items) do
+            print(item)
+        end
+        
+        Rayfield:Notify({
+            Title = "Готово",
+            Content = "Найдено пустых слотов: " .. #items,
+            Duration = 3,
+        })
+    end,
+})
+
+MainTab:CreateDivider()
+MainTab:CreateLabel("🔄 Перемещение предметов")
+
+MainTab:CreateSlider({
+    Name = "Слот сундука (ручной выбор)",
+    Range = {1, 99},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = 1,
+    Flag = "ChestSlot",
+    Callback = function(Value)
+        Config.ChestSlot = Value
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Слот инвентаря (ручной выбор)",
+    Range = {1, 99},
+    Increment = 1,
+    Suffix = "",
+    CurrentValue = 1,
+    Flag = "InvSlot",
+    Callback = function(Value)
+        Config.InventorySlot = Value
+    end,
+})
+
+MainTab:CreateButton({
+    Name = "➡️ Переместить предмет",
+    Callback = function()
+        MoveItem(Config.ChestSlot, Config.InventorySlot)
+    end,
+})
+
+Rayfield:Notify({
+    Title = "Загружено",
+    Content = "GUI готов к работе!",
+    Duration = 2,
+})
