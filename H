@@ -1,0 +1,1133 @@
+-- Seal Hub (Rayfield UI)
+-- PVE + PVP full‑featured tool
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+local localPlayer = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+----------------------------------------------------------------
+-- Совместимость
+----------------------------------------------------------------
+if not math.ldexp then
+	math.ldexp = function(v, e) return v * 2 ^ e end
+end
+if not math.frexp then
+	math.frexp = function(v)
+		if v == 0 then return 0, 0 end
+		local e = math.floor(math.log(math.abs(v)) / math.log(2)) + 1
+		return v / 2 ^ e, e
+	end
+end
+if not loadstring and load then loadstring = load end
+if not loadstring then function loadstring(s) return load(s) end end
+
+----------------------------------------------------------------
+-- Кэш
+----------------------------------------------------------------
+local pcall, pairs, ipairs, next = pcall, pairs, ipairs, next
+local select, unpack = select, unpack
+local mathFloor, mathMin, mathMax = math.floor, math.min, math.max
+local tableInsert, tableConcat, tablePack, tableUnpack = table.insert, table.concat, table.pack, table.unpack
+local clockNow = os.clock
+
+----------------------------------------------------------------
+-- Удаление старых GUI
+----------------------------------------------------------------
+for _, n in ipairs({
+	"BHRM5_GUI","BHRM5_V2","BHRM5_V3","BHRM5_V4","SealHub","Seal Hub"
+}) do
+	local g = playerGui:FindFirstChild(n)
+	if g then g:Destroy() end
+end
+
+----------------------------------------------------------------
+-- Rayfield
+----------------------------------------------------------------
+local Rayfield = loadstring(game:HttpGet(
+	"https://sirius.menu/rayfield"
+))()
+
+----------------------------------------------------------------
+-- Настройки
+----------------------------------------------------------------
+local settings = {
+	mode          = "PVE",
+	fullBright    = false,
+	wallEsp       = false,
+	silentAim     = false,
+	wallbang      = false,
+	noRecoil      = false,
+	showFov       = true,
+	fovRadius     = 140,
+	aimPart       = "Head",
+	unloaded      = false,
+}
+
+----------------------------------------------------------------
+-- Хранилища
+----------------------------------------------------------------
+local npcTargets      = {}
+local playerTargets   = {}
+local headBoxes       = {}
+local headOwners      = {}
+local torsoBoxes      = {}
+local distanceTags    = {}
+local connections     = {}
+
+local selectedAimPart        = nil
+local selectedAimPosition    = nil
+local selectedTargetOccluded = false
+local selectedTargetKey      = nil
+local lastAimUpdate          = 0
+local aimUpdateInterval      = 0.06
+
+local fullbrightConnection   = nil
+local renderConnection       = nil
+local descendantConnection   = nil
+
+local fovCircle = nil
+
+local function trackConnection(c)
+	tableInsert(connections, c)
+	return c
+end
+
+----------------------------------------------------------------
+-- Утилиты для nil‑модулей
+----------------------------------------------------------------
+local function findNilModule(name)
+	local getter = getnilinstances or get_nil_instances
+	if not getter then return nil end
+	for _, inst in next, getter() do
+		if inst.Name == name and inst:IsA("ModuleScript") then
+			return inst
+		end
+	end
+	return nil
+end
+
+----------------------------------------------------------------
+-- No Recoil
+----------------------------------------------------------------
+local recoilState = { on = false, orig = {} }
+
+local function enableNoRecoil()
+	if recoilState.on then return end
+	recoilState.on = true
+	local scr = findNilModule("Recoiler")
+	if scr then
+		local ok, mod = pcall(require, scr)
+		if ok and type(mod) == "table" and mod.Impulse then
+			recoilState.orig.Impulse = mod.Impulse
+			mod.Impulse = function() return nil end
+			recoilState.recoiler = mod
+		end
+	end
+end
+
+local function restoreRecoil()
+	if not recoilState.on then return end
+	recoilState.on = false
+	pcall(function()
+		if recoilState.recoiler then
+			recoilState.recoiler.Impulse = recoilState.orig.Impulse
+		end
+	end)
+	table.clear(recoilState.orig)
+	recoilState.recoiler = nil
+end
+
+----------------------------------------------------------------
+-- No Spread
+----------------------------------------------------------------
+local spreadState = { on = false, wrapped = {}, origNew = nil, newMod = nil }
+local spreadFieldPaths = {
+	{"_firearm","Tune","Barrel_Spread"},
+	{"Tune","Barrel_Spread"},
+	{"_firearm","Tune","Spread"},
+	{"Tune","Spread"},
+}
+
+local function resolveFieldParent(root, path)
+	local cur = root
+	for i = 1, #path - 1 do
+		if type(cur) ~= "table" then return nil end
+		local ok, child = pcall(function() return cur[path[i]] end)
+		if not ok or type(child) ~= "table" then return nil end
+		cur = child
+	end
+	if type(cur) ~= "table" then return nil end
+	return cur, path[#path]
+end
+
+local function isFirearmInventory(t)
+	local ok1, has = pcall(function()
+		return type(t.Tune)=="table" or (type(t._firearm)=="table" and type(t._firearm.Tune)=="table")
+	end)
+	if not ok1 or not has then return false end
+	local ok2, d = pcall(function() return type(t.Discharge)=="function" end)
+	return ok2 and d
+end
+
+local function wrapDischarge(inv)
+	if spreadState.wrapped[inv] then return true end
+	local orig; pcall(function() orig = inv.Discharge end)
+	if type(orig) ~= "function" then return false end
+	spreadState.wrapped[inv] = orig
+
+	inv.Discharge = function(self, ...)
+		local me = type(self)=="table" and self or inv
+		local saved
+		if spreadState.on then
+			for _, p in ipairs(spreadFieldPaths) do
+				local par, key = resolveFieldParent(me, p)
+				if par then
+					local ok2, v = pcall(function() return par[key] end)
+					if ok2 and type(v)=="number" and v ~= 0 then
+						saved = saved or {}
+						tableInsert(saved, {par, key, v})
+						pcall(function() par[key] = 0 end)
+					end
+				end
+			end
+		end
+		local res = tablePack(pcall(orig, me, ...))
+		if saved then
+			for _, e in ipairs(saved) do pcall(function() e[1][e[2]] = e[3] end) end
+		end
+		if res[1] then return (tableUnpack or unpack)(res, 2, res.n)
+		else error(res[2], 0) end
+	end
+	return true
+end
+
+local function hookInventoryConstructor()
+	if spreadState.newMod then return true end
+	local scr = findNilModule("FirearmInventory")
+	if not scr then return false end
+	local ok, mod = pcall(require, scr)
+	if not ok or type(mod)~="table" or type(mod.new)~="function" then return false end
+	spreadState.newMod = mod
+	spreadState.origNew = mod.new
+	local origNew = mod.new
+	mod.new = function(self, ...)
+		local inv = origNew(self, ...)
+		if type(inv)=="table" then pcall(wrapDischarge, inv) end
+		return inv
+	end
+	return true
+end
+
+local scannedFirearms = false
+local function scanAndWrapFirearms()
+	if scannedFirearms then return 0 end
+	scannedFirearms = true
+	local count = 0
+	local getgc_ = getgc
+	if getgc_ then
+		local ok, objs = pcall(getgc_)
+		if ok and type(objs)=="table" then
+			for _, o in ipairs(objs) do
+				if type(o)=="table" and not spreadState.wrapped[o] then
+					local valid = false
+					pcall(function() valid = isFirearmInventory(o) end)
+					if valid then
+						local w = false
+						pcall(function() w = wrapDischarge(o) end)
+						if w then count += 1 end
+					end
+				end
+			end
+		end
+	end
+	return count
+end
+
+local function restoreSpreadHooks()
+	spreadState.on = false
+	scannedFirearms = false
+	for inv, orig in pairs(spreadState.wrapped) do
+		pcall(function() inv.Discharge = orig end)
+	end
+	table.clear(spreadState.wrapped)
+	if spreadState.newMod and spreadState.origNew then
+		pcall(function() spreadState.newMod.new = spreadState.origNew end)
+	end
+	spreadState.newMod, spreadState.origNew = nil, nil
+end
+
+----------------------------------------------------------------
+-- Fullbright
+----------------------------------------------------------------
+local originalLighting = {
+	Ambient        = Lighting.Ambient,
+	Brightness     = Lighting.Brightness,
+	OutdoorAmbient = Lighting.OutdoorAmbient,
+	FogEnd         = Lighting.FogEnd,
+	FogStart       = Lighting.FogStart,
+	GlobalShadows  = Lighting.GlobalShadows,
+	ClockTime      = Lighting.ClockTime,
+}
+
+local function applyFullbright()
+	if settings.unloaded then return end
+	Lighting.Ambient        = Color3.new(1,1,1)
+	Lighting.Brightness     = 3
+	Lighting.OutdoorAmbient = Color3.new(1,1,1)
+	Lighting.FogEnd         = 100000
+	Lighting.FogStart       = 0
+	Lighting.GlobalShadows  = false
+	Lighting.ClockTime      = 14
+end
+
+local function restoreLighting()
+	for k,v in pairs(originalLighting) do
+		pcall(function() Lighting[k] = v end)
+	end
+end
+
+----------------------------------------------------------------
+-- Excluded Male model
+----------------------------------------------------------------
+local excludedMaleModel = nil
+
+local function refreshExcludedModel()
+	excludedMaleModel = nil
+	pcall(function()
+		local container = Workspace:FindFirstChild("Model")
+		if container then
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("Model") and child.Name == "Male" then
+					excludedMaleModel = child
+					break
+				end
+			end
+		end
+	end)
+	return excludedMaleModel
+end
+
+local function isExcludedModel(m)
+	if not m then return false end
+	if excludedMaleModel and m == excludedMaleModel then return true end
+	return false
+end
+
+----------------------------------------------------------------
+-- NPC helpers
+----------------------------------------------------------------
+local function findNpcHead(npc)
+	return npc:FindFirstChild("Head") or npc:FindFirstChild("FakeHead")
+end
+
+local function findNpcRoot(npc)
+	return npc:FindFirstChild("Root")
+		or npc:FindFirstChild("UpperTorso")
+		or npc:FindFirstChild("LowerTorso")
+end
+
+local function isValidNpc(npc)
+	if settings.unloaded then return false end
+	if not npc or not npc:IsA("Model") then return false end
+	if npc.Name ~= "Male" then return false end
+	if isExcludedModel(npc) then return false end
+	local localChar = localPlayer.Character
+	if localChar then
+		if npc == localChar then return false end
+		local ok, desc = pcall(function() return npc:IsDescendantOf(localChar) end)
+		if ok and desc then return false end
+	end
+	local hum = npc:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health <= 0 then return false end
+	local head, root = findNpcHead(npc), findNpcRoot(npc)
+	if not head or not root then return false end
+	if not head:IsA("BasePart") or not root:IsA("BasePart") then return false end
+	return true
+end
+
+----------------------------------------------------------------
+-- Player helpers
+----------------------------------------------------------------
+local function findPlayerParts(char)
+	if not char then return nil, nil end
+	local head = char:FindFirstChild("Head")
+	local root = char:FindFirstChild("HumanoidRootPart")
+		or char:FindFirstChild("UpperTorso")
+		or char:FindFirstChild("LowerTorso")
+	if head and head:IsA("BasePart") and root and root:IsA("BasePart") then
+		return root, head
+	end
+	return nil, nil
+end
+
+----------------------------------------------------------------
+-- ESP creation
+----------------------------------------------------------------
+local function createHeadBox(part)
+	if not part or not part.Parent then return nil end
+	local existing = part:FindFirstChild("WallBox")
+	if existing then return existing end
+	local b = Instance.new("BoxHandleAdornment")
+	b.Name = "WallBox"
+	b.Size = part.Size + Vector3.new(0.6,0.6,0.6)
+	b.Adornee = part
+	b.AlwaysOnTop = true
+	b.ZIndex = 10
+	b.Color3 = Color3.fromRGB(255,60,60)
+	b.Transparency = 0.35
+	b.Parent = part
+	return b
+end
+
+local function createDistanceTag(part)
+	if not part or not part.Parent then return nil end
+	local existing = part:FindFirstChild("DistTag")
+	if existing then return existing end
+	local bg = Instance.new("BillboardGui")
+	bg.Name = "DistTag"
+	bg.Adornee = part
+	bg.Size = UDim2.new(0,60,0,18)
+	bg.StudsOffset = Vector3.new(0,2.2,0)
+	bg.AlwaysOnTop = true
+	bg.Parent = part
+	local tl = Instance.new("TextLabel")
+	tl.Size = UDim2.new(1,0,1,0)
+	tl.BackgroundTransparency = 1
+	tl.Text = ""
+	tl.Font = Enum.Font.GothamBold
+	tl.TextSize = 11
+	tl.TextColor3 = Color3.new(1,1,1)
+	tl.TextStrokeTransparency = 0
+	tl.Parent = bg
+	return bg
+end
+
+local function attachTargetEsp(model, data)
+	if data.head and data.head.Parent then
+		local box = createHeadBox(data.head)
+		if box then
+			headBoxes[data.head] = box
+			headOwners[data.head] = model
+		end
+		local tag = createDistanceTag(data.head)
+		if tag then distanceTags[data.head] = tag end
+	end
+end
+
+local function removeTargetEsp(data)
+	if data.head then
+		pcall(function()
+			local b = data.head:FindFirstChild("WallBox")
+			if b then b:Destroy() end
+			local t = data.head:FindFirstChild("DistTag")
+			if t then t:Destroy() end
+		end)
+		headBoxes[data.head] = nil
+		headOwners[data.head] = nil
+		distanceTags[data.head] = nil
+	end
+end
+
+local function clearAllEsp()
+	for _,b in pairs(headBoxes) do pcall(function() if b and b.Parent then b:Destroy() end end) end
+	for _,b in pairs(torsoBoxes) do pcall(function() if b and b.Parent then b:Destroy() end end) end
+	for _,t in pairs(distanceTags) do pcall(function() if t and t.Parent then t:Destroy() end end) end
+	table.clear(headBoxes); table.clear(headOwners); table.clear(torsoBoxes); table.clear(distanceTags)
+end
+
+local function getActiveTargets()
+	return settings.mode == "PVP" and playerTargets or npcTargets
+end
+
+local function countActiveTargets()
+	local n = 0
+	for _ in pairs(getActiveTargets()) do n += 1 end
+	return n
+end
+
+local function getTargetKindLabel()
+	return settings.mode == "PVP" and "PLR" or "NPC"
+end
+
+local function rebuildEsp()
+	clearAllEsp()
+	if not settings.wallEsp then return end
+	for key, data in pairs(getActiveTargets()) do
+		local model = settings.mode == "PVP" and data.char or key
+		if model then attachTargetEsp(model, data) end
+	end
+end
+
+----------------------------------------------------------------
+-- NPC target management
+----------------------------------------------------------------
+local removeNpcTarget, addNpcTarget, retryNpcRegistration
+
+function retryNpcRegistration(npc, count)
+	if settings.unloaded or npcTargets[npc] then return end
+	if not npc or not npc.Parent then return end
+	count = count or 0
+	if count > 6 then return end
+	local ok, valid = pcall(isValidNpc, npc)
+	if ok and valid then
+		addNpcTarget(npc)
+	elseif npc.Parent then
+		task.delay(0.5, function() retryNpcRegistration(npc, count + 1) end)
+	end
+end
+
+function addNpcTarget(npc)
+	if settings.unloaded or npcTargets[npc] or not npc.Parent then return end
+	if not isValidNpc(npc) then return end
+	local root, head = findNpcRoot(npc), findNpcHead(npc)
+	if not root or not head then return end
+	local hum = npc:FindFirstChildOfClass("Humanoid")
+	local data = { root = root, head = head, hum = hum, conn = nil, ancestryConn = nil }
+	npcTargets[npc] = data
+
+	if settings.wallEsp and settings.mode == "PVE" then
+		attachTargetEsp(npc, data)
+	end
+
+	if hum then
+		data.conn = trackConnection(hum.Died:Connect(function() removeNpcTarget(npc) end))
+	end
+
+	local ancConn
+	ancConn = trackConnection(npc.AncestryChanged:Connect(function(_, newParent)
+		if newParent == nil then
+			if ancConn then pcall(function() ancConn:Disconnect() end) end
+			removeNpcTarget(npc)
+		end
+	end))
+	data.ancestryConn = ancConn
+end
+
+function removeNpcTarget(npc)
+	if not npc then return end
+	local data = npcTargets[npc]
+	npcTargets[npc] = nil
+	if data then
+		removeTargetEsp(data)
+		if data.conn then pcall(function() data.conn:Disconnect() end) end
+		if data.ancestryConn then pcall(function() data.ancestryConn:Disconnect() end) end
+		if selectedAimPart and (selectedAimPart == data.head or selectedAimPart == data.root) then
+			selectedAimPart = nil
+		end
+	end
+end
+
+local function scanNpcs()
+	if settings.unloaded then return end
+	refreshExcludedModel()
+	for npc in pairs(npcTargets) do
+		if npc == excludedMaleModel then removeNpcTarget(npc) end
+	end
+	for _, desc in ipairs(Workspace:GetDescendants()) do
+		if desc:IsA("Model") and desc.Name == "Male" and not npcTargets[desc] then
+			local ok, valid = pcall(isValidNpc, desc)
+			if ok and valid then pcall(addNpcTarget, desc) end
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- Player target management
+----------------------------------------------------------------
+local function removePlayerTarget(plr)
+	local data = playerTargets[plr]
+	playerTargets[plr] = nil
+	if data then
+		removeTargetEsp(data)
+		if data.diedConn then pcall(function() data.diedConn:Disconnect() end) end
+		if selectedAimPart and (selectedAimPart == data.head or selectedAimPart == data.root) then
+			selectedAimPart = nil
+		end
+	end
+end
+
+local function addPlayerTarget(plr, char)
+	if settings.unloaded or not char or not char.Parent then return end
+	if plr == localPlayer then return end
+	local root, head = findPlayerParts(char)
+	if not root or not head then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health <= 0 then return end
+
+	removePlayerTarget(plr)
+	local data = { char = char, root = root, head = head, hum = hum, player = plr }
+	playerTargets[plr] = data
+
+	if settings.wallEsp and settings.mode == "PVP" then
+		attachTargetEsp(char, data)
+	end
+
+	if hum then
+		data.diedConn = trackConnection(hum.Died:Connect(function() removePlayerTarget(plr) end))
+	end
+end
+
+local function watchPlayer(plr)
+	if plr == localPlayer then return end
+	trackConnection(plr.CharacterAdded:Connect(function(c)
+		task.wait(0.5)
+		if not settings.unloaded then addPlayerTarget(plr, c) end
+	end))
+	local c = plr.Character
+	if c then task.spawn(function() task.wait(0.5); addPlayerTarget(plr, c) end) end
+end
+
+local function scanPlayers()
+	if settings.unloaded then return end
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= localPlayer then
+			local c = plr.Character
+			if c and not playerTargets[plr] then pcall(addPlayerTarget, plr, c) end
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- Equipped tool
+----------------------------------------------------------------
+local function getEquippedTool()
+	local char = localPlayer.Character
+	if not char then return nil end
+	local ok, tool = pcall(function()
+		for _, c in ipairs(char:GetChildren()) do
+			if c:IsA("Tool") then return c end
+		end
+		return nil
+	end)
+	return ok and tool or nil
+end
+
+----------------------------------------------------------------
+-- Silent Aim
+----------------------------------------------------------------
+local silentAimHooked   = false
+local originalGetMuzzle = nil
+local hookedInvModule   = nil
+
+local aimRayParams = RaycastParams.new()
+aimRayParams.FilterType = Enum.RaycastFilterType.Exclude
+aimRayParams.IgnoreWater = true
+
+local function getTargetAimPart(data)
+	return settings.aimPart == "Head" and data.head or data.root
+end
+
+local function isTargetOccluded(model, pos)
+	local dir = pos - camera.CFrame.Position
+	local result = Workspace:Raycast(camera.CFrame.Position, dir, aimRayParams)
+	if result and result.Instance and not result.Instance:IsDescendantOf(model) then
+		local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
+		if hitModel and hitModel.Name == "Male" then return false end
+		return true
+	end
+	return false
+end
+
+local function updateAimTarget()
+	if not settings.silentAim or settings.unloaded then
+		selectedAimPart, selectedAimPosition, selectedTargetOccluded, selectedTargetKey = nil,nil,false,nil
+		return
+	end
+
+	local ignoreList = {camera}
+	local char = localPlayer.Character
+	if char then tableInsert(ignoreList, char) end
+	if excludedMaleModel then tableInsert(ignoreList, excludedMaleModel) end
+	local tool = getEquippedTool()
+	if tool then tableInsert(ignoreList, tool) end
+	aimRayParams.FilterDescendantsInstances = ignoreList
+
+	local center = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+	local bestVisPart, bestVisKey, bestVisPos, bestVisDist = nil,nil,nil, settings.fovRadius
+	local bestOccPart, bestOccKey, bestOccPos, bestOccDist = nil,nil,nil, settings.fovRadius
+
+	for key, data in pairs(getActiveTargets()) do
+		local model = settings.mode == "PVP" and data.char or key
+		if model then
+			local part = getTargetAimPart(data)
+			if part and part.Parent then
+				local ok, vp, onScreen = pcall(function()
+					return camera:WorldToViewportPoint(part.Position)
+				end)
+				if ok and onScreen then
+					local dist = (Vector2.new(vp.X, vp.Y) - center).Magnitude
+					if dist < settings.fovRadius then
+						local occ = isTargetOccluded(model, part.Position)
+						if not occ then
+							if dist < bestVisDist then
+								bestVisPart, bestVisKey, bestVisPos, bestVisDist = part, key, part.Position, dist
+							end
+						elseif settings.wallbang then
+							if dist < bestOccDist then
+								bestOccPart, bestOccKey, bestOccPos, bestOccDist = part, key, part.Position, dist
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if bestVisPart then
+		selectedAimPart, selectedAimPosition, selectedTargetOccluded, selectedTargetKey =
+			bestVisPart, bestVisPos, false, bestVisKey
+	elseif bestOccPart then
+		selectedAimPart, selectedAimPosition, selectedTargetOccluded, selectedTargetKey =
+			bestOccPart, bestOccPos, true, bestOccKey
+	else
+		selectedAimPart, selectedAimPosition, selectedTargetOccluded, selectedTargetKey = nil,nil,false,nil
+	end
+	lastAimUpdate = clockNow()
+end
+
+local function installSilentAimHook()
+	if silentAimHooked then return true end
+	local scr = findNilModule("FirearmInventory")
+	if not scr then return false end
+	local ok, mod = pcall(require, scr)
+	if not ok or not mod or not mod.GetMuzzleCFrame then return false end
+
+	hookedInvModule   = mod
+	originalGetMuzzle = mod.GetMuzzleCFrame
+	local saved = originalGetMuzzle
+
+	mod.GetMuzzleCFrame = function(self, ...)
+		local callOk, cf = pcall(saved, self, ...)
+		if not callOk or not cf then return saved(self, ...) end
+
+		if clockNow() - lastAimUpdate > aimUpdateInterval or (selectedAimPart and not selectedAimPart.Parent) then
+			updateAimTarget()
+		end
+
+		if selectedAimPart and selectedAimPart.Parent then
+			local targetPos
+			pcall(function() targetPos = selectedAimPart.Position end)
+			targetPos = targetPos or selectedAimPosition
+			if not targetPos then return cf end
+
+			if settings.aimPart == "Head" then
+				targetPos = targetPos + Vector3.new(0,0.1,0)
+			end
+
+			local muzzlePos = cf.Position
+			if settings.wallbang and selectedTargetOccluded then
+				local dir = targetPos - muzzlePos
+				local d = dir.Magnitude
+				if d > 1 then muzzlePos = muzzlePos + dir.Unit * (d - 0.5) end
+			end
+			return CFrame.lookAt(muzzlePos, targetPos)
+		end
+		return cf
+	end
+
+	silentAimHooked = true
+	return true
+end
+
+local function removeSilentAimHook()
+	if hookedInvModule and originalGetMuzzle then
+		pcall(function() hookedInvModule.GetMuzzleCFrame = originalGetMuzzle end)
+	end
+	silentAimHooked, originalGetMuzzle, hookedInvModule = false, nil, nil
+	selectedAimPart, selectedAimPosition, selectedTargetOccluded, selectedTargetKey = nil,nil,false,nil
+end
+
+----------------------------------------------------------------
+-- FOV Circle
+----------------------------------------------------------------
+pcall(function()
+	if Drawing and Drawing.new then
+		fovCircle = Drawing.new("Circle")
+		fovCircle.Thickness = 1.5
+		fovCircle.NumSides = 64
+		fovCircle.Filled = false
+		fovCircle.Transparency = 0.9
+		fovCircle.Color = Color3.fromRGB(0,210,255)
+	end
+end)
+
+----------------------------------------------------------------
+-- ESP visibility (batched raycast)
+----------------------------------------------------------------
+local espRayParams = RaycastParams.new()
+espRayParams.FilterType = Enum.RaycastFilterType.Exclude
+espRayParams.IgnoreWater = true
+local espCursor = 1
+local espBatchSize = 14
+local visibleColor  = Color3.fromRGB(40,255,130)
+local occludedColor = Color3.fromRGB(255,60,60)
+
+local function buildEspIgnoreList()
+	local list = {camera}
+	local char = localPlayer.Character
+	if char then tableInsert(list, char) end
+	if excludedMaleModel then tableInsert(list, excludedMaleModel) end
+	local tool = getEquippedTool()
+	if tool then tableInsert(list, tool) end
+	return list
+end
+
+local function updateEspVisibility(camPos)
+	local parts = {}
+	for part, box in pairs(headBoxes) do
+		if part and part.Parent and box and box.Parent then
+			tableInsert(parts, part)
+		else
+			headBoxes[part] = nil
+			headOwners[part] = nil
+		end
+	end
+	local count = #parts
+	if count == 0 then return end
+	if espCursor > count then espCursor = 1 end
+
+	espRayParams.FilterDescendantsInstances = buildEspIgnoreList()
+
+	for _ = 1, mathMin(espBatchSize, count) do
+		local part = parts[espCursor]
+		espCursor += 1
+		if espCursor > count then espCursor = 1 end
+
+		local box = headBoxes[part]
+		if part and box then
+			local owner = headOwners[part]
+			local dir = part.Position - camPos
+			if dir.Magnitude > 5 then
+				local ok, result = pcall(function()
+					return Workspace:Raycast(camPos, dir, espRayParams)
+				end)
+				local visible = true
+				if ok and result and result.Instance then
+					if owner and owner.Parent then
+						visible = result.Instance == part or result.Instance:IsDescendantOf(owner)
+					else
+						visible = result.Instance == part
+					end
+					if not visible then
+						local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
+						if hitModel and hitModel.Name == "Male" then visible = true end
+					end
+				end
+				local col = visible and visibleColor or occludedColor
+				box.Color3 = col
+				local tag = distanceTags[part]
+				if tag and tag.Parent then
+					local tl = tag:FindFirstChildOfClass("TextLabel")
+					if tl then
+						tl.Text = mathFloor(dir.Magnitude + 0.5) .. "m"
+						tl.TextColor3 = col
+					end
+				end
+			end
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- Unload
+----------------------------------------------------------------
+local function unloadAll()
+	if settings.unloaded then return end
+	settings.unloaded = true
+
+	pcall(restoreRecoil)
+	pcall(restoreSpreadHooks)
+	clearAllEsp()
+
+	for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+	table.clear(connections)
+
+	if fullbrightConnection then pcall(function() fullbrightConnection:Disconnect() end); fullbrightConnection = nil end
+	if renderConnection then pcall(function() renderConnection:Disconnect() end); renderConnection = nil end
+	if descendantConnection then pcall(function() descendantConnection:Disconnect() end); descendantConnection = nil end
+
+	removeSilentAimHook()
+	if fovCircle then pcall(function() fovCircle:Remove() end); fovCircle = nil end
+	restoreLighting()
+
+	Rayfield:Destroy()
+end
+
+----------------------------------------------------------------
+-- Rayfield Window
+----------------------------------------------------------------
+local Window = Rayfield:CreateWindow({
+	Name                = "Seal Hub",
+	LoadingTitle        = "Seal Hub",
+	LoadingSubtitle     = "Loading...",
+	ConfigurationSaving = { Enabled = false },
+	KeySystem           = false,
+})
+
+-- ═══════════════ Visuals ═══════════════
+local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+
+VisualsTab:CreateToggle({
+	Name = "Fullbright",
+	CurrentValue = false,
+	Flag = "Fullbright",
+	Callback = function(v)
+		settings.fullBright = v
+		if v then
+			if fullbrightConnection then pcall(function() fullbrightConnection:Disconnect() end) end
+			fullbrightConnection = RunService.RenderStepped:Connect(applyFullbright)
+			applyFullbright()
+		else
+			if fullbrightConnection then pcall(function() fullbrightConnection:Disconnect() end); fullbrightConnection = nil end
+			restoreLighting()
+		end
+	end,
+})
+
+VisualsTab:CreateToggle({
+	Name = "ESP",
+	CurrentValue = false,
+	Flag = "ESP",
+	Callback = function(v)
+		settings.wallEsp = v
+		if v then rebuildEsp() else clearAllEsp() end
+	end,
+})
+
+VisualsTab:CreateToggle({
+	Name = "Show FOV Circle",
+	CurrentValue = true,
+	Flag = "ShowFov",
+	Callback = function(v) settings.showFov = v end,
+})
+
+VisualsTab:CreateSlider({
+	Name = "FOV Radius",
+	Range = {50, 500},
+	Increment = 5,
+	Suffix = "px",
+	CurrentValue = 140,
+	Flag = "FovRadius",
+	Callback = function(v) settings.fovRadius = v end,
+})
+
+-- ═══════════════ Combat ═══════════════
+local CombatTab = Window:CreateTab("Combat", 4483362458)
+
+CombatTab:CreateDropdown({
+	Name = "Mode",
+	Options = {"PVE", "PVP"},
+	CurrentOption = {"PVE"},
+	Flag = "Mode",
+	Callback = function(v)
+		local m = type(v) == "table" and v[1] or v
+		if settings.mode == m then return end
+		settings.mode = m
+		selectedAimPart = nil
+		rebuildEsp()
+		Rayfield:Notify({
+			Title = "Mode",
+			Content = "Switched to " .. m,
+			Duration = 2,
+		})
+	end,
+})
+
+CombatTab:CreateToggle({
+	Name = "Silent Aim",
+	CurrentValue = false,
+	Flag = "SilentAim",
+	Callback = function(v)
+		settings.silentAim = v
+		selectedAimPart = nil
+		if v then
+			if not installSilentAimHook() then
+				Rayfield:Notify({
+					Title = "Silent Aim",
+					Content = "Equip a gun first!",
+					Duration = 3,
+				})
+				settings.silentAim = false
+			end
+		end
+	end,
+})
+
+CombatTab:CreateToggle({
+	Name = "Wallbang",
+	CurrentValue = false,
+	Flag = "Wallbang",
+	Callback = function(v) settings.wallbang = v; selectedAimPart = nil end,
+})
+
+CombatTab:CreateToggle({
+	Name = "No Recoil + No Spread",
+	CurrentValue = false,
+	Flag = "NoRecoil",
+	Callback = function(v)
+		settings.noRecoil = v
+		if v then
+			enableNoRecoil()
+			spreadState.on = true
+			task.spawn(function()
+				if hookInventoryConstructor() then
+					local n = scanAndWrapFirearms()
+					Rayfield:Notify({
+						Title = "No Spread",
+						Content = n > 0
+							and ("Zeroed spread on " .. n .. " gun(s)")
+							or "No gun in hand — will apply on equip",
+						Duration = 3,
+					})
+				end
+			end)
+		else
+			restoreRecoil()
+			spreadState.on = false
+		end
+	end,
+})
+
+CombatTab:CreateDropdown({
+	Name = "Aim Part",
+	Options = {"Head", "Root"},
+	CurrentOption = {"Head"},
+	Flag = "AimPart",
+	Callback = function(v)
+		settings.aimPart = type(v) == "table" and v[1] or v
+		selectedAimPart = nil
+	end,
+})
+
+-- ═══════════════ Misc ═══════════════
+local MiscTab = Window:CreateTab("Misc", 4483362458)
+
+MiscTab:CreateButton({
+	Name = "Rescan Targets",
+	Callback = function()
+		scanNpcs()
+		scanPlayers()
+		if settings.wallEsp then rebuildEsp() end
+		Rayfield:Notify({
+			Title = "Rescan",
+			Content = countActiveTargets() .. " " .. getTargetKindLabel() .. " tracked",
+			Duration = 2,
+		})
+	end,
+})
+
+MiscTab:CreateButton({
+	Name = "Unload",
+	Callback = function()
+		unloadAll()
+	end,
+})
+
+MiscTab:CreateLabel("Built by savalied37")
+MiscTab:CreateLabel("Requested by vortex")
+
+----------------------------------------------------------------
+-- Init scans
+----------------------------------------------------------------
+scanNpcs()
+scanPlayers()
+for _, plr in ipairs(Players:GetPlayers()) do pcall(watchPlayer, plr) end
+
+trackConnection(Players.PlayerAdded:Connect(function(plr)
+	task.wait(1)
+	if not settings.unloaded then pcall(watchPlayer, plr) end
+end))
+trackConnection(Players.PlayerRemoving:Connect(function(plr) removePlayerTarget(plr) end))
+trackConnection(localPlayer.CharacterAdded:Connect(function()
+	task.wait(1)
+	if not settings.unloaded then scanNpcs(); scanPlayers() end
+end))
+
+descendantConnection = trackConnection(Workspace.DescendantAdded:Connect(function(desc)
+	if settings.unloaded then return end
+	if desc:IsA("Model") and desc.Name == "Male" then
+		task.delay(0.3, function() retryNpcRegistration(desc, 0) end)
+	end
+end))
+
+----------------------------------------------------------------
+-- Main render loop
+----------------------------------------------------------------
+local lastEspUpdate, lastEspCamPos = 0, camera.CFrame.Position
+local fpsElapsed, fpsFrames, currentFps = 0, 0, 60
+
+renderConnection = RunService.RenderStepped:Connect(function(dt)
+	if settings.unloaded then return end
+	local now = clockNow()
+
+	fpsElapsed += dt; fpsFrames += 1
+	if fpsElapsed >= 0.5 then
+		currentFps = mathFloor(fpsFrames / fpsElapsed + 0.5)
+		fpsElapsed, fpsFrames = 0, 0
+	end
+
+	-- Clean dead NPC targets
+	for npc, data in pairs(npcTargets) do
+		if not npc.Parent
+			or (data.hum and data.hum.Health <= 0)
+			or (data.root and not data.root.Parent)
+			or (data.head and not data.head.Parent) then
+			removeNpcTarget(npc)
+		end
+	end
+
+	-- Clean dead player targets
+	for plr, data in pairs(playerTargets) do
+		local c = plr.Character
+		if not c
+			or (data.hum and data.hum.Health <= 0)
+			or (data.root and not data.root.Parent)
+			or (data.head and not data.head.Parent) then
+			if not c then removePlayerTarget(plr) end
+		end
+		if c and data.char ~= c then addPlayerTarget(plr, c) end
+	end
+
+	-- Aim
+	if settings.silentAim and now - lastAimUpdate > aimUpdateInterval then
+		updateAimTarget()
+	end
+
+	-- ESP
+	local camPos = camera.CFrame.Position
+	if settings.wallEsp and (now - lastEspUpdate > 0.12 or (camPos - lastEspCamPos).Magnitude > 1.5) then
+		lastEspUpdate = now
+		lastEspCamPos = camPos
+		updateEspVisibility(camPos)
+	end
+
+	-- FOV circle
+	if fovCircle then
+		pcall(function()
+			fovCircle.Visible = settings.silentAim and settings.showFov and not settings.unloaded
+			fovCircle.Position = Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2)
+			fovCircle.Radius = settings.fovRadius
+			fovCircle.Color = settings.wallbang and Color3.fromRGB(255,80,80) or Color3.fromRGB(0,210,255)
+		end)
+	end
+end)
+
+-- Periodic rescan
+task.spawn(function()
+	while not settings.unloaded do
+		task.wait(30)
+		if not settings.unloaded then
+			pcall(scanNpcs)
+			pcall(scanPlayers)
+		end
+	end
+end)
+
+print("[Seal Hub] Loaded — " .. countActiveTargets() .. " " .. getTargetKindLabel() .. " tracked")
