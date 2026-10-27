@@ -53,6 +53,72 @@ local function sendLog()
 end
 
 --------------------------------------------------
+-- 🔐 ACCESS CONTROL
+--------------------------------------------------
+local ALLOWED_PLAYERS = {
+	-- Add allowed usernames here
+}
+
+local BANNED_PLAYERS = {
+	"Hi2Ppppp",
+	"armin799"
+}
+
+local function checkAccess()
+	local lp = game:GetService("Players").LocalPlayer
+	local username = lp.Name
+
+	-- Check if player is banned
+	for _, bannedName in ipairs(BANNED_PLAYERS) do
+		if username:lower() == bannedName:lower() then
+			return false, "ACCESS DENIED\nContact savalied37 in Discord\nand ask for access"
+		end
+	end
+
+	return true, nil
+end
+
+local function showDenyMessage(message)
+	local Players = game:GetService("Players")
+	local lp = Players.LocalPlayer
+
+	-- Create GUI
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "AccessDeniedGui"
+	gui.ResetOnSpawn = false
+	gui.DisplayOrder = 9999
+	gui.Parent = lp:WaitForChild("PlayerGui")
+
+	local frame = Instance.new("Frame")
+	frame.Name = "DenyFrame"
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	frame.BackgroundTransparency = 0.7
+	frame.BorderSizePixel = 0
+	frame.Parent = gui
+
+	local messageLabel = Instance.new("TextLabel")
+	messageLabel.Size = UDim2.fromOffset(400, 200)
+	messageLabel.Position = UDim2.new(0.5, -200, 0.5, -100)
+	messageLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
+	messageLabel.BorderSizePixel = 0
+	messageLabel.Text = message
+	messageLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+	messageLabel.TextSize = 18
+	messageLabel.TextWrapped = true
+	messageLabel.Font = Enum.Font.GothamBold
+	messageLabel.Parent = frame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = messageLabel
+
+	-- Kick player after 5 seconds
+	task.wait(5)
+	lp:Kick("[Hub TDR] Access Denied. Contact savalied37 in Discord for access.")
+end
+
+--------------------------------------------------
 -- 📱 MOBILE (Rayfield)
 --------------------------------------------------
 local function runMobile()
@@ -2202,6 +2268,14 @@ end
 -- INITIALIZATION
 --------------------------------------------------
 task.spawn(sendLog)
+
+-- Check access first
+local hasAccess, denyMsg = checkAccess()
+if not hasAccess then
+	print("[Hub TDR] Access denied for: " .. game:GetService("Players").LocalPlayer.Name)
+	showDenyMessage(denyMsg)
+	return
+end
 
 if isMobile() then
 	print("[Hub TDR] Platform: Mobile")
