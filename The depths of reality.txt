@@ -52,7 +52,6 @@ local function sendLog()
 	})
 end
 
-
 --------------------------------------------------
 -- 📱 MOBILE (Rayfield)
 --------------------------------------------------
@@ -2204,18 +2203,10 @@ end
 --------------------------------------------------
 task.spawn(sendLog)
 
--- Check access first
-local hasAccess, denyMsg = checkAccess()
-if not hasAccess then
-	print("[Hub TDR] Access denied for: " .. game:GetService("Players").LocalPlayer.Name)
-	showDenyMessage(denyMsg)
-	return
-end
-
 if isMobile() then
 	print("[Hub TDR] Platform: Mobile")
 	runMobile()
 else
 	print("[Hub TDR] Platform: PC")
 	runPC()
-end
+end 
