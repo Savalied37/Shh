@@ -68,41 +68,15 @@ local function runMobile()
 	--------------------------------------------------
 	-- RAYFIELD
 	--------------------------------------------------
-	local Rayfield
-	local ok, err = pcall(function()
-		Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
-	end)
-	if not ok then
-		warn("[Hub TDR] Rayfield load failed: " .. tostring(err))
-		return
-	end
+	local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 	--------------------------------------------------
 	-- ECS
 	--------------------------------------------------
-	local RL
-	pcall(function()
-		RL = require(ReplicatedStorage.rbxts_include.RuntimeLib)
-	end)
-	if not RL then
-		warn("[Hub TDR] RuntimeLib not found")
-		return
-	end
-
-	local GameWorld
-	local Components
-	local findTopmost
-
-	pcall(function()
-		GameWorld = RL.import(script, ReplicatedStorage, "Game", "matter", "gameWorld").GameWorld
-		Components = RL.import(script, ReplicatedStorage, "Game", "matter", "components").Components
-		findTopmost = RL.import(script, ReplicatedStorage, "Game", "matter", "utils", "interactable").findTopmostEntityAncestor
-	end)
-
-	if not GameWorld or not Components or not findTopmost then
-		warn("[Hub TDR] ECS modules not found")
-		return
-	end
+	local RL = require(ReplicatedStorage.rbxts_include.RuntimeLib)
+	local GameWorld = RL.import(script, ReplicatedStorage, "Game", "matter", "gameWorld").GameWorld
+	local Components = RL.import(script, ReplicatedStorage, "Game", "matter", "components").Components
+	local findTopmost = RL.import(script, ReplicatedStorage, "Game", "matter", "utils", "interactable").findTopmostEntityAncestor
 
 	local cnt = ReplicatedStorage.rbxts_include.node_modules["@rbxts"].remo.src.container
 	local remInteract = cnt["player.input.interact"]
@@ -461,6 +435,7 @@ local function runMobile()
 			local hb = getHitbox(model)
 			if not hb or not hb.Parent then return end
 
+			-- hoverOffsetY can be positive (above) or negative (below)
 			local abovePos = hb.Position + Vector3.new(0, hoverOffsetY, 0)
 
 			pcall(function()
@@ -506,6 +481,9 @@ local function runMobile()
 	local TabItems    = Win:CreateTab("Items", 4483362458)
 	local pItemStatus = TabItems:CreateParagraph({Title="info", Content="idle"})
 
+	--------------------------------------------------
+	-- AUTO COLLECT TOGGLE
+	--------------------------------------------------
 	local autoCollectEnabled = false
 	local autoCollectRunning = false
 
@@ -1014,7 +992,7 @@ local function runMobile()
 		end
 	end)
 
-	print("hub tdr loaded (mobile)")
+	print("hub tdr loaded")
 end
 
 --------------------------------------------------
@@ -1355,19 +1333,9 @@ local function runPC()
 		return res
 	end
 
-	local GameWorld, Components, findTopmost
-	local pcOk = pcall(function()
-		GameWorld   = imp("Game", "matter", "gameWorld").GameWorld
-		Components  = imp("Game", "matter", "components").Components
-		findTopmost = imp("Game", "matter", "utils", "interactable").findTopmostEntityAncestor
-	end)
-
-	if not pcOk or not GameWorld or not Components or not findTopmost then
-		UI:Notify({Title="Error", Content="ECS modules load failed", Duration=5})
-		print("[Hub TDR PC] ECS load error - check ReplicatedStorage")
-		UI:Destroy()
-		return
-	end
+	local GameWorld   = imp("Game", "matter", "gameWorld").GameWorld
+	local Components  = imp("Game", "matter", "components").Components
+	local findTopmost = imp("Game", "matter", "utils", "interactable").findTopmostEntityAncestor
 
 	local cnt = ReplicatedStorage.rbxts_include.node_modules["@rbxts"].remo.src.container
 	local remInteract = cnt["player.input.interact"]
@@ -1711,6 +1679,7 @@ local function runPC()
 			local hb = getHitbox(model)
 			if not hb or not hb.Parent then return end
 
+			-- hoverOffsetY can be positive (above) or negative (below)
 			local abovePos = hb.Position + Vector3.new(0, hoverOffsetY, 0)
 
 			pcall(function()
@@ -1742,6 +1711,9 @@ local function runPC()
 	local TabItems    = Win:CreateTab("Items")
 	local pItemStatus = TabItems:CreateParagraph({Title="info", Content="idle"})
 
+	--------------------------------------------------
+	-- AUTO COLLECT TOGGLE
+	--------------------------------------------------
 	local autoCollectEnabled = false
 	local autoCollectRunning = false
 
@@ -2223,7 +2195,7 @@ local function runPC()
 		end
 	end)
 
-	print("hub tdr loaded (PC - Velocity-compatible)")
+	print("hub tdr loaded (velocity-compatible)")
 end
 
 --------------------------------------------------
