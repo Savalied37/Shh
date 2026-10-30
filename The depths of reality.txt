@@ -27,7 +27,7 @@ end
 -- ============================================
 -- DISCORD WEBHOOK
 -- ============================================
-local WEBHOOK_URL = "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1565730543515992205/tQm6UnABWbdUY_ot8EAkewhysU3ayLKpAllLTo5zK-AupqMXQTLnjDeqmmjbdEwAoYTe"
 
 local function sendWebhook(username, placeName, action)
     local payload = {
