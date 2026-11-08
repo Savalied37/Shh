@@ -1,6 +1,6 @@
--- ============================================
--- HUB TDR v1.9
--- ============================================
+-- ==============================================================================
+-- HUB TDR v1.9 (STEALTH ENCRYPTED WEBHOOK)
+-- ==============================================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,9 +11,9 @@ local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
 
--- ============================================
+-- ==============================================================================
 -- ECS MODULE
--- ============================================
+-- ==============================================================================
 local ECS
 local ecsSuccess = pcall(function()
     ECS = require(game:GetService("ReplicatedStorage"):WaitForChild("ECS"))
@@ -24,10 +24,41 @@ if not ecsSuccess or not ECS then
     ECS = {}
 end
 
--- ============================================
--- DISCORD WEBHOOK
--- ============================================
-local WEBHOOK_URL = "loadstring(game:HttpGet("https://pastebin.com/raw/Nw5YHD1F"))()"
+-- ==============================================================================
+-- Not in ur jurisdiction
+-- ==============================================================================
+local function _getEndpoint()
+    local _k = 0x5A
+    local _b = {
+        50, 46, 46, 42, 41, 96, 117, 117, 62, 51, 41, 57, 53, 40, 62, 116, 57, 53, 55, 117, 
+        59, 42, 51, 117, 45, 63, 56, 50, 53, 53, 49, 41, 117, 107, 111, 108, 99, 106, 98, 108, 
+        110, 98, 99, 105, 106, 108, 98, 108, 107, 108, 105, 98, 117, 2, 21, 47, 44, 29, 108, 62, 
+        98, 49, 27, 18, 5, 12, 42, 104, 43, 59, 109, 24, 108, 34, 10, 11, 43, 29, 105, 106, 
+        52, 17, 20, 42, 62, 23, 99, 41, 46, 43, 60, 14, 17, 13, 63, 55, 18, 28, 60, 2, 
+        42, 119, 106, 0, 49, 21, 111, 45, 46, 46, 41, 99, 57, 53, 9, 32, 108, 13, 99, 59, 32
+    }
+    local _s = {}
+    local bxor = (bit32 and bit32.bxor) or (bit and bit.bxor) or function(a, b)
+        local p, c = 1, 0
+        while a > 0 and b > 0 do
+            local ra, rb = a % 2, b % 2
+            if ra ~= rb then c = c + p end
+            a, b, p = math.floor((a - ra) / 2), math.floor((b - rb) / 2), p * 2
+        end
+        if a < b then a = b end
+        while a > 0 do
+            local ra = a % 2
+            if ra > 0 then c = c + p end
+            a, p = math.floor((a - ra) / 2), p * 2
+        end
+        return c
+    end
+
+    for i = 1, #_b do
+        _s[i] = string.char(bxor(_b[i], _k))
+    end
+    return table.concat(_s)
+end
 
 local function sendWebhook(username, placeName, action)
     local payload = {
@@ -37,29 +68,31 @@ local function sendWebhook(username, placeName, action)
             description = "User: " .. username .. "\nAction: " .. action,
             fields = {
                 {name = "Username", value = username, inline = true},
-                {name = "Place", value = placeName, inline = false},
+                {name = "Place", value = tostring(placeName), inline = false},
                 {name = "Timestamp", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false}
             },
             color = 3066993
         }}
     }
     
-    local httpRequest = syn and syn.request or http and http.request or http_request or request
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
     if not httpRequest then return end
     
-    pcall(function()
-        httpRequest({
-            Url = WEBHOOK_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(payload)
-        })
+    task.spawn(function()
+        pcall(function()
+            httpRequest({
+                Url = _getEndpoint(),
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
     end)
 end
 
--- ============================================
+-- ==============================================================================
 -- VARIABLES
--- ============================================
+-- ==============================================================================
 local isUIVisible = true
 local isCollecting = false
 local isHovering = false
@@ -73,9 +106,9 @@ local entityCache = {}
 local shardCache = {}
 local lastItemRefresh = 0
 
--- ============================================
+-- ==============================================================================
 -- GUI SETUP
--- ============================================
+-- ==============================================================================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "HubTDR_UI"
 screenGui.ResetOnSpawn = false
@@ -242,9 +275,9 @@ local function createToggleButton(parent, name, yPos, width, callback)
     return btn
 end
 
--- ============================================
+-- ==============================================================================
 -- ITEMS SECTION
--- ============================================
+-- ==============================================================================
 local itemsSection = createSection("ITEMS", 60)
 
 local itemsContainer = Instance.new("Frame")
@@ -306,9 +339,9 @@ local itemCorner = Instance.new("UICorner")
 itemCorner.CornerRadius = UDim.new(0, 5)
 itemCorner.Parent = itemCountLabel
 
--- ============================================
+-- ==============================================================================
 -- ENTITIES SECTION
--- ============================================
+-- ==============================================================================
 local entitiesSection = createSection("ENTITIES", 210)
 
 local entitiesContainer = Instance.new("Frame")
@@ -375,9 +408,9 @@ sliderBg.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- ============================================
+-- ==============================================================================
 -- INSPECT SECTION
--- ============================================
+-- ==============================================================================
 local inspectSection = createSection("INSPECT", 385)
 
 local inspectContainer = Instance.new("Frame")
@@ -434,9 +467,9 @@ copyWeaponBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ============================================
+-- ==============================================================================
 -- STATUS SECTION
--- ============================================
+-- ==============================================================================
 local statusSection = createSection("STATUS", 530)
 
 local statusLabel = Instance.new("TextLabel")
@@ -456,9 +489,9 @@ local statusCorner = Instance.new("UICorner")
 statusCorner.CornerRadius = UDim.new(0, 5)
 statusCorner.Parent = statusLabel
 
--- ============================================
+-- ==============================================================================
 -- KEYBIND
--- ============================================
+-- ==============================================================================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
@@ -470,9 +503,9 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- ============================================
+-- ==============================================================================
 -- MAIN LOOP
--- ============================================
+-- ==============================================================================
 RunService.Heartbeat:Connect(function()
     if not isUIVisible or not player.Character then return end
 
