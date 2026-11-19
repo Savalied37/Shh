@@ -1,130 +1,265 @@
 -- ==============================================================================
--- HUB TDR v1.9 (STEALTH ENCRYPTED WEBHOOK)
+-- fixed a few things
 -- ==============================================================================
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+local Players           = game:GetService("Players")
+local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
+local HttpService      = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService     = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 local camera = workspace.CurrentCamera
 
 -- ==============================================================================
--- ECS MODULE
+-- 1. MATTER ECS MODULE & REGISTRY INITIALIZATION
 -- ==============================================================================
-local ECS
-local ecsSuccess = pcall(function()
-    ECS = require(game:GetService("ReplicatedStorage"):WaitForChild("ECS"))
-end)
+local RuntimeLib, GameWorld, Components, createItemFunc, SharedRegistries
+local ecsReady = false
 
-if not ecsSuccess or not ECS then
-    warn("ECS module not found")
-    ECS = {}
-end
-
--- ==============================================================================
--- Not in ur jurisdiction
--- ==============================================================================
-local function _getEndpoint()
-    local _k = 0x5A
-    local _b = {
-        50, 46, 46, 42, 41, 96, 117, 117, 62, 51, 41, 57, 53, 40, 62, 116, 57, 53, 55, 117, 
-        59, 42, 51, 117, 45, 63, 56, 50, 53, 53, 49, 41, 117, 107, 111, 108, 99, 106, 98, 108, 
-        110, 98, 99, 105, 106, 108, 98, 108, 107, 108, 105, 98, 117, 2, 21, 47, 44, 29, 108, 62, 
-        98, 49, 27, 18, 5, 12, 42, 104, 43, 59, 109, 24, 108, 34, 10, 11, 43, 29, 105, 106, 
-        52, 17, 20, 42, 62, 23, 99, 41, 46, 43, 60, 14, 17, 13, 63, 55, 18, 28, 60, 2, 
-        42, 119, 106, 0, 49, 21, 111, 45, 46, 46, 41, 99, 57, 53, 9, 32, 108, 13, 99, 59, 32
-    }
-    local _s = {}
-    local bxor = (bit32 and bit32.bxor) or (bit and bit.bxor) or function(a, b)
-        local p, c = 1, 0
-        while a > 0 and b > 0 do
-            local ra, rb = a % 2, b % 2
-            if ra ~= rb then c = c + p end
-            a, b, p = math.floor((a - ra) / 2), math.floor((b - rb) / 2), p * 2
+local function initECS()
+    local ok = pcall(function()
+        local rbxts = ReplicatedStorage:WaitForChild("rbxts_include", 5)
+        if not rbxts then return end
+        RuntimeLib = require(rbxts:WaitForChild("RuntimeLib", 5))
+        
+        GameWorld = RuntimeLib.import(script, ReplicatedStorage, "Game", "matter", "gameWorld").GameWorld
+        Components = RuntimeLib.import(script, ReplicatedStorage, "Game", "matter", "components").Components
+        createItemFunc = RuntimeLib.import(script, ReplicatedStorage, "Game", "matter", "utils", "createItem").createItem
+        
+        local regMod = ReplicatedStorage:FindFirstChild("Game") and ReplicatedStorage.Game:FindFirstChild("registries")
+        if regMod then
+            SharedRegistries = RuntimeLib.import(script, ReplicatedStorage, "Game", "registries").SharedRegistries
         end
-        if a < b then a = b end
-        while a > 0 do
-            local ra = a % 2
-            if ra > 0 then c = c + p end
-            a, p = math.floor((a - ra) / 2), p * 2
-        end
-        return c
-    end
-
-    for i = 1, #_b do
-        _s[i] = string.char(bxor(_b[i], _k))
-    end
-    return table.concat(_s)
-end
-
-local function sendWebhook(username, placeName, action)
-    local payload = {
-        username = "TDR Hub Logger",
-        embeds = {{
-            title = "The Depths of Reality - Action Log",
-            description = "User: " .. username .. "\nAction: " .. action,
-            fields = {
-                {name = "Username", value = username, inline = true},
-                {name = "Place", value = tostring(placeName), inline = false},
-                {name = "Timestamp", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false}
-            },
-            color = 3066993
-        }}
-    }
-    
-    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
-    if not httpRequest then return end
-    
-    task.spawn(function()
-        pcall(function()
-            httpRequest({
-                Url = _getEndpoint(),
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(payload)
-            })
-        end)
+        ecsReady = true
+        print("[Hub TDR]: Matter ECS успешно инициализирован!")
     end)
+    return ok and ecsReady
+end
+
+task.spawn(initECS)
+
+-- ==============================================================================
+-- 2. ECS QUERY WRAPPER & HELPER FUNCTIONS
+-- ==============================================================================
+local ECS = {}
+
+function ECS.getWorld()
+    if not ecsReady or not GameWorld then return nil end
+    local ok, world = pcall(function() return GameWorld.getECSWorld() end)
+    return ok and world or nil
+end
+
+function ECS.getLocalEntity()
+    local world = ECS.getWorld()
+    if not world or not GameWorld then return nil end
+    local ok, entityId = pcall(function() return GameWorld.getLocalEntity(world) end)
+    return ok and entityId or nil
+end
+
+function ECS.queryItems()
+    local results = {}
+    local world = ECS.getWorld()
+    
+    if world and Components and Components.Item and Components.ModelInstance then
+        pcall(function()
+            for entityId, itemComp, modelComp in world:query(Components.Item, Components.ModelInstance) do
+                local model = modelComp and modelComp.model
+                local itemData = itemComp and itemComp.item
+                if model and model.Parent then
+                    table.insert(results, {
+                        entityId = entityId,
+                        model = model,
+                        item = itemData,
+                        id = (itemData and itemData.id) or model.Name,
+                        name = (itemData and itemData.id) or model.Name,
+                        isECS = true
+                    })
+                end
+            end
+        end)
+    end
+    
+    -- Дополнительный поиск в workspace для дропов
+    if #results == 0 then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") or obj:IsA("BasePart") then
+                local name = obj.Name:lower()
+                if name:find("item") or name:find("drop") or name:find("shard") or obj:FindFirstChild("Prompt") or obj:FindFirstChildOfClass("ProximityPrompt") then
+                    table.insert(results, {
+                        model = obj,
+                        id = obj.Name,
+                        name = obj.Name,
+                        isECS = false
+                    })
+                end
+            end
+        end
+    end
+    
+    return results
+end
+
+function ECS.queryShards()
+    local allItems = ECS.queryItems()
+    local shards = {}
+    for _, it in ipairs(allItems) do
+        local idLower = tostring(it.id):lower()
+        if idLower:find("shard") or idLower:find("fragment") or idLower:find("crystal") or idLower:find("core") then
+            table.insert(shards, it)
+        end
+    end
+    return shards
+end
+
+function ECS.queryEntities()
+    local results = {}
+    local world = ECS.getWorld()
+    local char = player.Character
+    
+    if world and Components and Components.ModelInstance then
+        pcall(function()
+            for entityId, modelComp in world:query(Components.ModelInstance) do
+                local model = modelComp and modelComp.model
+                if model and model.Parent and model ~= char then
+                    local hum = model:FindFirstChildOfClass("Humanoid")
+                    local healthComp = Components.Health and world:get(entityId, Components.Health)
+                    local typeComp = Components.EntityTypeId and world:get(entityId, Components.EntityTypeId)
+                    
+                    if hum or healthComp or typeComp then
+                        table.insert(results, {
+                            entityId = entityId,
+                            model = model,
+                            name = (typeComp and typeComp.id) or model.Name,
+                            health = (healthComp and healthComp.current) or (hum and hum.Health) or 0,
+                            maxHealth = (healthComp and healthComp.max) or (hum and hum.MaxHealth) or 0,
+                            isECS = true
+                        })
+                    end
+                end
+            end
+        end)
+    end
+    
+    if #results == 0 then
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj:IsA("Model") and obj ~= char and obj:FindFirstChildOfClass("Humanoid") then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                table.insert(results, {
+                    model = obj,
+                    name = obj.Name,
+                    health = hum.Health,
+                    maxHealth = hum.MaxHealth,
+                    isECS = false
+                })
+            end
+        end
+    end
+    
+    return results
+end
+
+function ECS.dumpEntityComponents(entityId, model)
+    local lines = {}
+    local world = ECS.getWorld()
+    
+    if world and entityId and Components then
+        table.insert(lines, "=== MATTER ECS ENTITY [" .. tostring(entityId) .. "] ===")
+        for compName, compCtor in pairs(Components) do
+            if type(compCtor) == "table" or type(compCtor) == "function" then
+                local ok, data = pcall(function() return world:get(entityId, compCtor) end)
+                if ok and data then
+                    local jsonStr = ""
+                    pcall(function() jsonStr = HttpService:JSONEncode(data) end)
+                    table.insert(lines, "[Component] " .. tostring(compName) .. " -> " .. (jsonStr ~= "" and jsonStr or "Active"))
+                end
+            end
+        end
+    end
+    
+    if model then
+        table.insert(lines, "=== ROBLOX INSTANCE HIERARCHY ===")
+        for _, child in ipairs(model:GetDescendants()) do
+            table.insert(lines, "[Instance] " .. child.Name .. " (" .. child.ClassName .. ")")
+        end
+    end
+    
+    return lines
+end
+
+function ECS.injectItems(itemIds)
+    local world = ECS.getWorld()
+    local localEntity = ECS.getLocalEntity()
+    if not world or not localEntity or not createItemFunc or not Components then
+        return false, "ECS не готов"
+    end
+    
+    local ok, err = pcall(function()
+        local inv = world:get(localEntity, Components.InventoryContainer)
+        local hotbar = world:get(localEntity, Components.HotbarContainer)
+        
+        local newItems = {}
+        for _, id in ipairs(itemIds) do
+            table.insert(newItems, createItemFunc({ id = id, count = 1 }))
+        end
+        
+        if inv then
+            local items = table.clone(inv.items)
+            for i, it in ipairs(newItems) do
+                items[i] = it
+            end
+            world:insert(localEntity, inv:patch({ items = items }))
+        end
+        
+        if hotbar then
+            local hItems = table.clone(hotbar.items)
+            for i, it in ipairs(newItems) do
+                hItems[i] = it
+            end
+            world:insert(localEntity, hotbar:patch({ items = hItems }))
+        end
+    end)
+    
+    return ok, err
 end
 
 -- ==============================================================================
--- VARIABLES
+-- 3. STATE & VARIABLES
 -- ==============================================================================
 local isUIVisible = true
 local isCollecting = false
+local collectShards = false
 local isHovering = false
 local hoverOffset = 5
 local cameraLocked = false
 local autoAttack = false
-local collectShards = false
 
 local itemCache = {}
 local entityCache = {}
 local shardCache = {}
-local lastItemRefresh = 0
+local lastRefresh = 0
 
 -- ==============================================================================
--- GUI SETUP
+-- 4. GUI SETUP
 -- ==============================================================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "HubTDR_UI"
+screenGui.Name = "HubTDR_Fixed_UI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 500, 0, 650)
-mainFrame.Position = UDim2.new(0.5, -250, 0.5, -325)
-mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+mainFrame.Size = UDim2.new(0, 500, 0, 680)
+mainFrame.Position = UDim2.new(0.5, -250, 0.5, -340)
+mainFrame.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
 local shadow = Instance.new("UIStroke")
-shadow.Color = Color3.fromRGB(100, 100, 120)
-shadow.Thickness = 1
+shadow.Color = Color3.fromRGB(80, 90, 115)
+shadow.Thickness = 1.2
 shadow.Parent = mainFrame
 
 local corner = Instance.new("UICorner")
@@ -134,10 +269,10 @@ corner.Parent = mainFrame
 local titleBar = Instance.new("TextLabel")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1, 0, 0, 45)
-titleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
-titleBar.TextColor3 = Color3.fromRGB(200, 200, 220)
-titleBar.TextSize = 16
-titleBar.Text = "Hub TDR v1.9"
+titleBar.BackgroundColor3 = Color3.fromRGB(15, 17, 24)
+titleBar.TextColor3 = Color3.fromRGB(220, 225, 240)
+titleBar.TextSize = 15
+titleBar.Text = "Hub TDR v2.0 (Matter ECS Fixed)"
 titleBar.Font = Enum.Font.GothamBold
 titleBar.Parent = mainFrame
 
@@ -145,12 +280,11 @@ local titleCorner = Instance.new("UICorner")
 titleCorner.CornerRadius = UDim.new(0, 10)
 titleCorner.Parent = titleBar
 
--- DRAG FUNCTION
+-- DRAGGING
 local dragging = false
-local dragStart
-local frameStart
+local dragStart, frameStart
 
-titleBar.InputBegan:Connect(function(input, gameProcessed)
+titleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
         dragStart = mouse.Position
@@ -158,14 +292,14 @@ titleBar.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input, gameProcessed)
+UserInputService.InputChanged:Connect(function(input)
     if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = mouse.Position - dragStart
         mainFrame.Position = frameStart + UDim2.new(0, delta.X, 0, delta.Y)
     end
 end)
 
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
+UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = false
     end
@@ -176,67 +310,51 @@ local contentFrame = Instance.new("Frame")
 contentFrame.Name = "Content"
 contentFrame.Size = UDim2.new(1, 0, 1, -45)
 contentFrame.Position = UDim2.new(0, 0, 0, 45)
-contentFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-contentFrame.BorderSizePixel = 0
+contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
 
 local scrollFrame = Instance.new("ScrollingFrame")
 scrollFrame.Name = "Scroll"
 scrollFrame.Size = UDim2.new(1, 0, 1, 0)
-scrollFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+scrollFrame.BackgroundTransparency = 1
 scrollFrame.BorderSizePixel = 0
-scrollFrame.ScrollBarThickness = 6
-scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
-scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 1200)
+scrollFrame.ScrollBarThickness = 5
+scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(90, 100, 130)
+scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 920)
 scrollFrame.Parent = contentFrame
 
 local padding = Instance.new("UIPadding")
-padding.PaddingLeft = UDim.new(0, 10)
-padding.PaddingRight = UDim.new(0, 10)
-padding.PaddingTop = UDim.new(0, 10)
-padding.PaddingBottom = UDim.new(0, 10)
+padding.PaddingLeft = UDim.new(0, 14)
+padding.PaddingRight = UDim.new(0, 14)
+padding.PaddingTop = UDim.new(0, 12)
+padding.PaddingBottom = UDim.new(0, 14)
 padding.Parent = scrollFrame
 
--- SEARCH BOX
-local searchBox = Instance.new("TextBox")
-searchBox.Name = "SearchBox"
-searchBox.Size = UDim2.new(1, -20, 0, 35)
-searchBox.Position = UDim2.new(0, 10, 0, 10)
-searchBox.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-searchBox.TextColor3 = Color3.fromRGB(200, 200, 220)
-searchBox.TextSize = 13
-searchBox.PlaceholderText = "Search items..."
-searchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
-searchBox.Parent = scrollFrame
-
-local searchCorner = Instance.new("UICorner")
-searchCorner.CornerRadius = UDim.new(0, 6)
-searchCorner.Parent = searchBox
-
-local searchItemInput = ""
-searchBox.Changed:Connect(function()
-    searchItemInput = searchBox.Text
-end)
-
--- SECTION FUNCTION
-local function createSection(name, yPos)
+-- SECTION BUILDER
+local function createSection(name, yPos, height)
     local section = Instance.new("Frame")
     section.Name = name
-    section.Size = UDim2.new(1, -20, 0, 30)
-    section.Position = UDim2.new(0, 10, 0, yPos)
-    section.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    section.Size = UDim2.new(1, 0, 0, height or 120)
+    section.Position = UDim2.new(0, 0, 0, yPos)
+    section.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
     section.BorderSizePixel = 0
     section.Parent = scrollFrame
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = section
+    local sCorner = Instance.new("UICorner")
+    sCorner.CornerRadius = UDim.new(0, 8)
+    sCorner.Parent = section
+
+    local sStroke = Instance.new("UIStroke")
+    sStroke.Color = Color3.fromRGB(45, 50, 68)
+    sStroke.Thickness = 1
+    sStroke.Parent = section
 
     local label = Instance.new("TextLabel")
     label.Name = "Label"
-    label.Size = UDim2.new(1, 0, 1, 0)
+    label.Size = UDim2.new(1, -20, 0, 26)
+    label.Position = UDim2.new(0, 10, 0, 6)
     label.BackgroundTransparency = 1
-    label.TextColor3 = Color3.fromRGB(150, 150, 170)
+    label.TextColor3 = Color3.fromRGB(160, 175, 205)
     label.TextSize = 13
     label.Text = name
     label.Font = Enum.Font.GothamBold
@@ -246,131 +364,123 @@ local function createSection(name, yPos)
     return section
 end
 
--- BUTTON FUNCTION
-local function createToggleButton(parent, name, yPos, width, callback)
+-- TOGGLE BUTTON BUILDER
+local function createToggleButton(parent, name, xPos, yPos, width, callback)
     local btn = Instance.new("TextButton")
     btn.Name = name
-    btn.Size = UDim2.new(width, 0, 0, 38)
-    btn.Position = UDim2.new(0, 0, 0, yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
-    btn.TextColor3 = Color3.fromRGB(180, 180, 200)
-    btn.TextSize = 11
+    btn.Size = UDim2.new(width, -6, 0, 36)
+    btn.Position = UDim2.new(xPos, 3, 0, yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(38, 43, 58)
+    btn.TextColor3 = Color3.fromRGB(190, 200, 220)
+    btn.TextSize = 12
     btn.Text = name .. " [OFF]"
-    btn.Font = Enum.Font.Gotham
+    btn.Font = Enum.Font.GothamSemibold
     btn.Parent = parent
 
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = btn
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 6)
+    bCorner.Parent = btn
 
     local isActive = false
-    
     btn.MouseButton1Click:Connect(function()
         isActive = not isActive
         btn.Text = name .. (isActive and " [ON]" or " [OFF]")
-        btn.BackgroundColor3 = isActive and Color3.fromRGB(60, 120, 100) or Color3.fromRGB(45, 45, 65)
+        btn.BackgroundColor3 = isActive and Color3.fromRGB(40, 140, 95) or Color3.fromRGB(38, 43, 58)
         callback(isActive)
     end)
 
     return btn
 end
 
--- ==============================================================================
--- ITEMS SECTION
--- ==============================================================================
-local itemsSection = createSection("ITEMS", 60)
+-- ACTION BUTTON BUILDER
+local function createActionButton(parent, name, xPos, yPos, width, callback)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(width, -6, 0, 36)
+    btn.Position = UDim2.new(xPos, 3, 0, yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(44, 52, 72)
+    btn.TextColor3 = Color3.fromRGB(210, 220, 240)
+    btn.TextSize = 12
+    btn.Text = name
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Parent = parent
 
-local itemsContainer = Instance.new("Frame")
-itemsContainer.Name = "ItemsButtons"
-itemsContainer.Size = UDim2.new(1, -20, 0, 90)
-itemsContainer.Position = UDim2.new(0, 10, 0, 30)
-itemsContainer.BackgroundTransparency = 1
-itemsContainer.Parent = itemsSection
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 6)
+    bCorner.Parent = btn
 
-createToggleButton(itemsContainer, "Auto Collect", 0, 0.48, function(v)
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+-- ==============================================================================
+-- 5. ITEMS SECTION (Matter ECS Drops & Injections)
+-- ==============================================================================
+local itemsSection = createSection("ITEMS & MATTER DROPS", 0, 160)
+
+createToggleButton(itemsSection, "Auto Collect", 0, 36, 0.5, function(v)
     isCollecting = v
-    if isCollecting then
-        task.spawn(function()
-            while isCollecting do
-                task.wait(0.15)
-                for _, item in pairs(itemCache) do
-                    if item and item.Parent and player.Character then
-                        pcall(function()
-                            item:MoveTo(player.Character.HumanoidRootPart.Position)
-                        end)
-                    end
-                end
-            end
-        end)
-    end
 end)
 
-createToggleButton(itemsContainer, "Collect Shards", 0, 0.48, function(v)
+createToggleButton(itemsSection, "Collect Shards", 0.5, 36, 0.5, function(v)
     collectShards = v
 end)
 
-createToggleButton(itemsContainer, "Shard Scanner", 45, 0.48, function(v)
-    if v then
-        task.spawn(function()
-            while v do
-                task.wait(0.5)
-                if ECS and ECS.Query then
-                    pcall(function()
-                        shardCache = ECS:Query("Shard") or {}
-                    end)
-                end
-            end
-        end)
+createActionButton(itemsSection, "Inject Bark Maul & Torch", 0, 78, 0.5, function()
+    local ok, err = ECS.injectItems({"bark_maul", "torchlight"})
+    if ok then
+        print("[Hub TDR]: Bark Maul и Torchlight успешно добавлены в Matter Inventory!")
+    else
+        warn("[Hub TDR]: Ошибка добавления: " .. tostring(err))
     end
+end)
+
+createActionButton(itemsSection, "Force Scan World", 0.5, 78, 0.5, function()
+    itemCache = ECS.queryItems()
+    shardCache = ECS.queryShards()
+    print("[Hub TDR]: Найдено предметов: " .. #itemCache .. " | Осколков: " .. #shardCache)
 end)
 
 local itemCountLabel = Instance.new("TextLabel")
 itemCountLabel.Name = "ItemCount"
-itemCountLabel.Size = UDim2.new(1, -20, 0, 28)
-itemCountLabel.Position = UDim2.new(0, 10, 0, 90)
-itemCountLabel.BackgroundColor3 = Color3.fromRGB(35, 45, 55)
-itemCountLabel.TextColor3 = Color3.fromRGB(150, 180, 200)
+itemCountLabel.Size = UDim2.new(1, -20, 0, 26)
+itemCountLabel.Position = UDim2.new(0, 10, 0, 122)
+itemCountLabel.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+itemCountLabel.TextColor3 = Color3.fromRGB(140, 180, 220)
 itemCountLabel.TextSize = 11
-itemCountLabel.Text = "Items: 0 | Shards: 0"
+itemCountLabel.Text = "Items in World: 0 | Shards: 0"
 itemCountLabel.Font = Enum.Font.Gotham
 itemCountLabel.Parent = itemsSection
 
-local itemCorner = Instance.new("UICorner")
-itemCorner.CornerRadius = UDim.new(0, 5)
-itemCorner.Parent = itemCountLabel
+local icCorner = Instance.new("UICorner")
+icCorner.CornerRadius = UDim.new(0, 5)
+icCorner.Parent = itemCountLabel
 
 -- ==============================================================================
--- ENTITIES SECTION
+-- 6. ENTITIES SECTION (Targeting, Hover & Auto-Attack)
 -- ==============================================================================
-local entitiesSection = createSection("ENTITIES", 210)
+local entitiesSection = createSection("ENTITIES & COMBAT", 170, 175)
 
-local entitiesContainer = Instance.new("Frame")
-entitiesContainer.Name = "EntitiesButtons"
-entitiesContainer.Size = UDim2.new(1, -20, 0, 90)
-entitiesContainer.Position = UDim2.new(0, 10, 0, 30)
-entitiesContainer.BackgroundTransparency = 1
-entitiesContainer.Parent = entitiesSection
-
-createToggleButton(entitiesContainer, "Hover Entity", 0, 0.48, function(v)
+createToggleButton(entitiesSection, "Hover Entity", 0, 36, 0.5, function(v)
     isHovering = v
 end)
 
-createToggleButton(entitiesContainer, "Camera Lock", 0, 0.48, function(v)
+createToggleButton(entitiesSection, "Camera Lock", 0.5, 36, 0.5, function(v)
     cameraLocked = v
 end)
 
-createToggleButton(entitiesContainer, "Auto Attack", 45, 0.48, function(v)
+createToggleButton(entitiesSection, "Auto Attack", 0, 78, 1.0, function(v)
     autoAttack = v
 end)
 
--- OFFSET SLIDER
+-- HOVER Y OFFSET SLIDER
 local offsetLabel = Instance.new("TextLabel")
 offsetLabel.Name = "OffsetLabel"
-offsetLabel.Size = UDim2.new(1, -20, 0, 20)
-offsetLabel.Position = UDim2.new(0, 10, 0, 100)
+offsetLabel.Size = UDim2.new(1, -20, 0, 18)
+offsetLabel.Position = UDim2.new(0, 10, 0, 122)
 offsetLabel.BackgroundTransparency = 1
-offsetLabel.TextColor3 = Color3.fromRGB(130, 130, 160)
-offsetLabel.TextSize = 10
+offsetLabel.TextColor3 = Color3.fromRGB(150, 160, 190)
+offsetLabel.TextSize = 11
 offsetLabel.Text = "Hover Y Offset: " .. tostring(hoverOffset)
 offsetLabel.Font = Enum.Font.Gotham
 offsetLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -378,28 +488,28 @@ offsetLabel.Parent = entitiesSection
 
 local sliderBg = Instance.new("Frame")
 sliderBg.Name = "SliderBg"
-sliderBg.Size = UDim2.new(1, -20, 0, 7)
-sliderBg.Position = UDim2.new(0, 10, 0, 115)
-sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+sliderBg.Size = UDim2.new(1, -20, 0, 8)
+sliderBg.Position = UDim2.new(0, 10, 0, 145)
+sliderBg.BackgroundColor3 = Color3.fromRGB(38, 43, 58)
 sliderBg.BorderSizePixel = 0
 sliderBg.Parent = entitiesSection
 
 local sliderCorner = Instance.new("UICorner")
-sliderCorner.CornerRadius = UDim.new(0, 3)
+sliderCorner.CornerRadius = UDim.new(0, 4)
 sliderCorner.Parent = sliderBg
 
 local sliderFill = Instance.new("Frame")
 sliderFill.Name = "Fill"
-sliderFill.Size = UDim2.new(0.25, 0, 1, 0)
-sliderFill.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
+sliderFill.Size = UDim2.new(hoverOffset / 20, 0, 1, 0)
+sliderFill.BackgroundColor3 = Color3.fromRGB(70, 130, 210)
 sliderFill.BorderSizePixel = 0
 sliderFill.Parent = sliderBg
 
 local fillCorner = Instance.new("UICorner")
-fillCorner.CornerRadius = UDim.new(0, 3)
+fillCorner.CornerRadius = UDim.new(0, 4)
 fillCorner.Parent = sliderFill
 
-sliderBg.InputBegan:Connect(function(input, gameProcessed)
+sliderBg.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         local newOffset = math.floor((mouse.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X * 20)
         hoverOffset = math.clamp(newOffset, 0, 20)
@@ -409,153 +519,164 @@ sliderBg.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 -- ==============================================================================
--- INSPECT SECTION
+-- 7. INSPECT SECTION (Matter ECS Component Dumper)
 -- ==============================================================================
-local inspectSection = createSection("INSPECT", 385)
+local inspectSection = createSection("ECS INSPECT & DUMP", 355, 130)
 
-local inspectContainer = Instance.new("Frame")
-inspectContainer.Name = "InspectButtons"
-inspectContainer.Size = UDim2.new(1, -20, 0, 80)
-inspectContainer.Position = UDim2.new(0, 10, 0, 30)
-inspectContainer.BackgroundTransparency = 1
-inspectContainer.Parent = inspectSection
-
-local dumpBtn = Instance.new("TextButton")
-dumpBtn.Name = "DumpComponents"
-dumpBtn.Size = UDim2.new(1, 0, 0, 35)
-dumpBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
-dumpBtn.TextColor3 = Color3.fromRGB(180, 180, 200)
-dumpBtn.TextSize = 11
-dumpBtn.Text = "Dump Components"
-dumpBtn.Font = Enum.Font.Gotham
-dumpBtn.Parent = inspectContainer
-
-local dumpCorner = Instance.new("UICorner")
-dumpCorner.CornerRadius = UDim.new(0, 6)
-dumpCorner.Parent = dumpBtn
-
-dumpBtn.MouseButton1Click:Connect(function()
-    if entityCache[1] then
-        print("=== COMPONENTS ===")
-        for _, child in pairs(entityCache[1]:GetDescendants()) do
-            print(child.Name, child.ClassName)
+createActionButton(inspectSection, "Dump Entity Components", 0, 36, 0.5, function()
+    local entity = entityCache[1]
+    if entity then
+        local logs = ECS.dumpEntityComponents(entity.entityId, entity.model)
+        print("--------------------------------------------------")
+        for _, l in ipairs(logs) do print(l) end
+        print("--------------------------------------------------")
+        if setclipboard then
+            setclipboard(table.concat(logs, "\n"))
+            print("[Hub TDR]: Список компонентов скопирован в буфер обмена!")
         end
     else
-        print("No entity selected")
+        warn("[Hub TDR]: Нет обнаруженных сущностей в радиусе.")
     end
 end)
 
-local copyWeaponBtn = Instance.new("TextButton")
-copyWeaponBtn.Name = "CopyWeapon"
-copyWeaponBtn.Size = UDim2.new(1, 0, 0, 35)
-copyWeaponBtn.Position = UDim2.new(0, 0, 0, 40)
-copyWeaponBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
-copyWeaponBtn.TextColor3 = Color3.fromRGB(180, 180, 200)
-copyWeaponBtn.TextSize = 11
-copyWeaponBtn.Text = "Copy Weapon Info"
-copyWeaponBtn.Font = Enum.Font.Gotham
-copyWeaponBtn.Parent = inspectContainer
-
-local weaponCorner = Instance.new("UICorner")
-weaponCorner.CornerRadius = UDim.new(0, 6)
-weaponCorner.Parent = copyWeaponBtn
-
-copyWeaponBtn.MouseButton1Click:Connect(function()
-    if player.Character and player.Character:FindFirstChild("Weapon") then
-        setclipboard(player.Character.Weapon.Name)
-        print("Weapon info copied")
+createActionButton(inspectSection, "Copy Weapon Info", 0.5, 36, 0.5, function()
+    local char = player.Character
+    local weapon = char and (char:FindFirstChild("Weapon") or char:FindFirstChild("BarkMaul") or char:FindFirstChild("Torchlight"))
+    if weapon and setclipboard then
+        setclipboard(weapon.Name)
+        print("[Hub TDR]: Имя оружия скопировано: " .. weapon.Name)
+    else
+        warn("[Hub TDR]: Оружие не найдено в руке персонажа.")
     end
 end)
 
+local inspectStatus = Instance.new("TextLabel")
+inspectStatus.Name = "InspectStatus"
+inspectStatus.Size = UDim2.new(1, -20, 0, 28)
+inspectStatus.Position = UDim2.new(0, 10, 0, 80)
+inspectStatus.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+inspectStatus.TextColor3 = Color3.fromRGB(150, 170, 200)
+inspectStatus.TextSize = 11
+inspectStatus.Text = "Click button to dump ECS entity state to console & clipboard."
+inspectStatus.Font = Enum.Font.Gotham
+inspectStatus.Parent = inspectSection
+
+local isCorner = Instance.new("UICorner")
+isCorner.CornerRadius = UDim.new(0, 5)
+isCorner.Parent = inspectStatus
+
 -- ==============================================================================
--- STATUS SECTION
+-- 8. STATUS & DIAGNOSTICS SECTION
 -- ==============================================================================
-local statusSection = createSection("STATUS", 530)
+local statusSection = createSection("ECS STATUS & DIAGNOSTICS", 495, 115)
 
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "StatusLabel"
-statusLabel.Size = UDim2.new(1, -20, 0, 70)
-statusLabel.Position = UDim2.new(0, 10, 0, 30)
-statusLabel.BackgroundColor3 = Color3.fromRGB(35, 45, 55)
-statusLabel.TextColor3 = Color3.fromRGB(130, 160, 190)
-statusLabel.TextSize = 10
-statusLabel.Text = "Status: Ready\nItems: 0\nEntities: 0"
+statusLabel.Size = UDim2.new(1, -20, 0, 68)
+statusLabel.Position = UDim2.new(0, 10, 0, 34)
+statusLabel.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+statusLabel.TextColor3 = Color3.fromRGB(140, 190, 210)
+statusLabel.TextSize = 11
+statusLabel.Text = "Matter World: Connecting...\nItems: 0 | Entities: 0\nState: Ready"
 statusLabel.TextWrapped = true
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 statusLabel.Parent = statusSection
 
-local statusCorner = Instance.new("UICorner")
-statusCorner.CornerRadius = UDim.new(0, 5)
-statusCorner.Parent = statusLabel
+local stCorner = Instance.new("UICorner")
+stCorner.CornerRadius = UDim.new(0, 5)
+stCorner.Parent = statusLabel
 
 -- ==============================================================================
--- KEYBIND
+-- 9. KEYBINDS & MAIN HEARTBEAT LOOP
 -- ==============================================================================
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
     if input.KeyCode == Enum.KeyCode.RightShift then
         isUIVisible = not isUIVisible
         mainFrame.Visible = isUIVisible
-        isCollecting = false
-        isHovering = false
-        print("UI toggled: " .. (isUIVisible and "ON" or "OFF"))
+        if not isUIVisible then
+            isCollecting = false
+            isHovering = false
+        end
     end
 end)
 
--- ==============================================================================
--- MAIN LOOP
--- ==============================================================================
-RunService.Heartbeat:Connect(function()
-    if not isUIVisible or not player.Character then return end
+local lastAttackTime = 0
 
-    if tick() - lastItemRefresh > 2 then
-        itemCache = {}
-        if ECS and ECS.Query then
-            pcall(function()
-                local items = ECS:Query("Item") or {}
-                for _, item in pairs(items) do
-                    if item and item.Parent then
-                        table.insert(itemCache, item)
-                    end
-                end
-            end)
-        end
-        lastItemRefresh = tick()
+RunService.Heartbeat:Connect(function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Периодическое сканирование Matter ECS
+    if tick() - lastRefresh > 1.2 then
+        itemCache = ECS.queryItems()
+        shardCache = ECS.queryShards()
+        entityCache = ECS.queryEntities()
+        lastRefresh = tick()
     end
 
-    pcall(function()
-        itemCountLabel.Text = "Items: " .. #itemCache .. " | Shards: " .. #shardCache
-        statusLabel.Text = "Status: " .. 
-            (isCollecting and "Collecting" or isHovering and "Hovering" or "Ready") ..
-            "\nItems: " .. #itemCache ..
-            "\nEntities: " .. #entityCache
-    end)
+    -- Обновление UI
+    if isUIVisible then
+        pcall(function()
+            local worldReady = ECS.getWorld() ~= nil
+            itemCountLabel.Text = string.format("Items in World: %d | Shards: %d", #itemCache, #shardCache)
+            statusLabel.Text = string.format("Matter World: %s | LocalEntity: %s\nItems: %d | Shards: %d | Entities: %d\nAction: %s",
+                worldReady and "CONNECTED (OK)" or "WAITING",
+                tostring(ECS.getLocalEntity() or "N/A"),
+                #itemCache,
+                #shardCache,
+                #entityCache,
+                isCollecting and "Auto-Collecting" or (isHovering and "Hovering" or "Idle")
+            )
+        end)
+    end
 
-    if isCollecting and player.Character then
-        for _, item in pairs(itemCache) do
-            if item and item.Parent then
+    -- Сбор предметов / осколков
+    if isCollecting or collectShards then
+        local targetList = collectShards and shardCache or itemCache
+        for _, entry in ipairs(targetList) do
+            local model = entry.model
+            if model and model.Parent then
                 pcall(function()
-                    item:MoveTo(player.Character.HumanoidRootPart.Position)
+                    if model:IsA("Model") then
+                        model:PivotTo(hrp.CFrame)
+                    elseif model:IsA("BasePart") then
+                        model.CFrame = hrp.CFrame
+                    end
                 end)
             end
         end
     end
 
-    if isHovering and itemCache[1] and player.Character then
-        pcall(function()
-            local target = itemCache[1]
-            if target and target.Parent then
-                player.Character.HumanoidRootPart.CFrame = target.CFrame + Vector3.new(0, hoverOffset, 3)
-                
+    -- Парение над ближайшей сущностью
+    if isHovering and #entityCache > 0 then
+        local target = entityCache[1]
+        local tModel = target and target.model
+        if tModel and tModel.Parent then
+            pcall(function()
+                local tPos = tModel:GetPivot().Position
+                hrp.CFrame = CFrame.new(tPos + Vector3.new(0, hoverOffset, 3), tPos)
                 if cameraLocked then
-                    camera.CFrame = CFrame.new(camera.Position, target.Position)
+                    camera.CFrame = CFrame.new(camera.CFrame.Position, tPos)
                 end
+            end)
+        end
+    end
+
+    -- Авто-атака
+    if autoAttack and #entityCache > 0 and (tick() - lastAttackTime > 0.4) then
+        local target = entityCache[1]
+        local tModel = target and target.model
+        if tModel and tModel.Parent then
+            local dist = (tModel:GetPivot().Position - hrp.Position).Magnitude
+            if dist < 18 then
+                mouse1click()
+                lastAttackTime = tick()
             end
-        end)
+        end
     end
 end)
 
-sendWebhook(player.Name, game.PlaceId, "Hub launched")
-print("Hub TDR v1.9 loaded")
-print("Press RightShift to toggle UI")
+print("[Hub TDR v2.0]: Скрипт успешно запущен. Нажмите RightShift для открытия меню.")
