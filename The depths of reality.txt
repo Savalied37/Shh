@@ -896,77 +896,584 @@ local function runMobile()
 		pInspectInfo:Set({Title="info", Content=ok and "copied!" or "err: "..tostring(err)})
 	end})
 
-	TabInspect:CreateDivider()
 
-	local inspectEid = 0
-	TabInspect:CreateInput({
-		Name="entity id", PlaceholderText="eid...",
-		RemoveTextAfterFocusLost=false,
-		Callback=function(t) inspectEid = tonumber(t) or 0 end
+	-- ============ TAB: PVP ============
+	local TabPvP = Win:CreateTab("PvP", 4483362458)
+
+	-- 1. Hitbox Extender State
+	local hitboxActive = false
+	local hitboxSize = 15
+	local hitboxTransparency = 0.6
+	local modifiedHitboxes = {}
+
+	local function restoreHitboxes()
+		for part, data in pairs(modifiedHitboxes) do
+			if part and part.Parent then
+				pcall(function()
+					part.Size = data.origSize or Vector3.new(2, 2, 1)
+					part.Transparency = data.origTransparency or 1
+					part.CanCollide = data.origCanCollide or false
+				end)
+			end
+		end
+		table.clear(modifiedHitboxes)
+	end
+
+	local function updateHitboxes()
+		if not hitboxActive then
+			restoreHitboxes()
+			return
+		end
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= lp and p.Character then
+				local hrp = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Torso")
+				if hrp and hrp:IsA("BasePart") then
+					if not modifiedHitboxes[hrp] then
+						modifiedHitboxes[hrp] = {
+							origSize = hrp.Size,
+							origTransparency = hrp.Transparency,
+							origCanCollide = hrp.CanCollide
+						}
+					end
+					hrp.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+					hrp.Transparency = hitboxTransparency
+					hrp.CanCollide = false
+					hrp.Massless = true
+				end
+			end
+		end
+	end
+
+	TabPvP:CreateSection("Player Hitbox Extender")
+
+	local toggleHitboxUI = TabPvP:CreateToggle({
+		Name = "Hitbox Extender",
+		CurrentValue = false,
+		Callback = function(v)
+			hitboxActive = v
+			updateHitboxes()
+		end
 	})
 
-	TabInspect:CreateButton({Name="dump components", Callback=function()
-		if inspectEid == 0 then return end
-		local world = getWorld()
-		local lines = {}
-		for compName, comp in pairs(Components) do
-			local ok, val = pcall(world.get, world, inspectEid, comp)
-			if ok and val ~= nil then
-				local fields = ""
-				if type(val) == "table" then
-					local parts = {}
-					for k, v in pairs(val) do
-						if type(v) ~= "table" and type(v) ~= "userdata" then
-							parts[#parts+1] = tostring(k).."="..tostring(v)
-						elseif type(v) == "userdata" then
-							local ok2, n = pcall(function() return v.Name end)
-							parts[#parts+1] = tostring(k).."=["..(ok2 and n or "ud").."]"
-						end
-					end
-					if #parts > 0 then fields = " {"..table.concat(parts, ", ").."}" end
-				end
-				lines[#lines+1] = compName..fields
-			end
+	TabPvP:CreateSlider({
+		Name = "Hitbox Size",
+		Range = {2, 40},
+		Increment = 1,
+		CurrentValue = 15,
+		Suffix = "studs",
+		Callback = function(v)
+			hitboxSize = v
+			if hitboxActive then updateHitboxes() end
 		end
-		if #lines == 0 then
-			pInspectList:Set({Title="eid "..inspectEid, Content="not found"})
-		else
-			pInspectList:Set({
-				Title   = "eid "..inspectEid.." ("..#lines..")",
-				Content = table.concat(lines, "\n")
-			})
-		end
-	end})
+	})
 
-	TabInspect:CreateButton({Name="copy components", Callback=function()
-		if inspectEid == 0 then return end
-		local world = getWorld()
-		local lines = {"=== eid "..inspectEid.." ===", "time: "..os.date("%Y-%m-%d %H:%M:%S"), ""}
-		for compName, comp in pairs(Components) do
-			local ok, val = pcall(world.get, world, inspectEid, comp)
-			if ok and val ~= nil then
-				local fields = ""
-				if type(val) == "table" then
-					local parts = {}
-					for k, v in pairs(val) do
-						if type(v) ~= "table" and type(v) ~= "userdata" then
-							parts[#parts+1] = tostring(k).."="..tostring(v)
-						elseif type(v) == "userdata" then
-							local ok2, n = pcall(function() return v.Name end)
-							parts[#parts+1] = tostring(k).."=["..(ok2 and n or "ud").."]"
-						end
-					end
-					if #parts > 0 then fields = " {"..table.concat(parts, ", ").."}" end
-				end
-				lines[#lines+1] = compName..fields
+	TabPvP:CreateSlider({
+		Name = "Hitbox Transparency",
+		Range = {0, 100},
+		Increment = 5,
+		CurrentValue = 60,
+		Suffix = "%",
+		Callback = function(v)
+			hitboxTransparency = v / 100
+			if hitboxActive then updateHitboxes() end
+		end
+	})
+
+	-- 2. Universal Auto-Parry State
+	local autoParryActive = false
+	local parryRange = 22
+	local parryHoldDuration = 0.15
+	local parryProjectiles = true
+	local lastParryTick = 0
+
+	local function triggerBlockAction(state)
+		pcall(function()
+			if remAction then
+				remAction:FireServer("block", state)
+			elseif remotes and remotes.player and remotes.player.input and remotes.player.input.action then
+				remotes.player.input.action:fire("block", state)
+			end
+		end)
+	end
+
+	local function doParry(reason)
+		local now = tick()
+		if now - lastParryTick < (parryHoldDuration + 0.05) then return end
+		lastParryTick = now
+		
+		task.spawn(function()
+			triggerBlockAction(Enum.UserInputState.Begin)
+			task.wait(parryHoldDuration)
+			triggerBlockAction(Enum.UserInputState.End)
+		end)
+	end
+
+	local knownAttackKeywords = {
+		"attack", "m1", "m2", "swing", "slash", "stab", "strike", "thrust", "slam",
+		"cleave", "smash", "ability", "combo", "stomp", "spear", "hammer", "greataxe",
+		"dagger", "machete", "scythe", "hacksaw", "tomahawk", "crush", "punch", "kick",
+		"root_trap", "toxic_gas", "spit", "bite", "claw", "reap", "charged", "dash_attack"
+	}
+
+	local function isAttackTrack(track)
+		local name = (track.Name or ""):lower()
+		for _, kw in ipairs(knownAttackKeywords) do
+			if string.find(name, kw) then return true end
+		end
+		if track.Priority == Enum.AnimationPriority.Action or track.Priority == Enum.AnimationPriority.Action2 or track.Priority == Enum.AnimationPriority.Action3 or track.Priority == Enum.AnimationPriority.Action4 then
+			if not string.find(name, "idle") and not string.find(name, "walk") and not string.find(name, "run") and not string.find(name, "jump") and not string.find(name, "fall") and not string.find(name, "sit") and not string.find(name, "hold") then
+				return true
 			end
 		end
-		local ok, err = pcall(setclipboard, table.concat(lines, "\n"))
-		pInspectInfo:Set({Title="info", Content=ok and "copied!" or "err: "..tostring(err)})
-	end})
+		return false
+	end
+
+	local function hookCharAnimations(c)
+		if not c or c == lp.Character then return end
+		local hum = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid", 3)
+		if not hum then return end
+		local anim = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
+		if not anim then return end
+
+		anim.AnimationPlayed:Connect(function(track)
+			if not autoParryActive then return end
+			local myChar = lp.Character
+			local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+			local enemyRoot = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c.PrimaryPart
+			if not myRoot or not enemyRoot then return end
+
+			local dist = (myRoot.Position - enemyRoot.Position).Magnitude
+			if dist > parryRange then return end
+			if not isAttackTrack(track) then return end
+
+			local ping = 0.05
+			pcall(function()
+				ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+			end)
+			ping = math.clamp(ping, 0.02, 0.25)
+
+			local animLen = track.Length > 0.1 and track.Length or 0.6
+			local hitDelay = math.max(0.01, (animLen * 0.35) - ping)
+
+			task.delay(hitDelay, function()
+				if autoParryActive and c and c.Parent and myChar and myChar.Parent then
+					local curDist = (myRoot.Position - enemyRoot.Position).Magnitude
+					if curDist <= (parryRange + 6) then
+						doParry("Attack: " .. tostring(track.Name))
+					end
+				end
+			end)
+		end)
+	end
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and p.Character then hookCharAnimations(p.Character) end
+		p.CharacterAdded:Connect(hookCharAnimations)
+	end
+	Players.PlayerAdded:Connect(function(p)
+		p.CharacterAdded:Connect(hookCharAnimations)
+	end)
+
+	for _, m in ipairs(Workspace:GetChildren()) do
+		if m:IsA("Model") and m ~= lp.Character and m:FindFirstChildOfClass("Humanoid") then
+			hookCharAnimations(m)
+		end
+	end
+	Workspace.ChildAdded:Connect(function(m)
+		if m:IsA("Model") and m ~= lp.Character then
+			task.wait(0.2)
+			if m:FindFirstChildOfClass("Humanoid") then
+				hookCharAnimations(m)
+			end
+		end
+	end)
+
+	TabPvP:CreateSection("Universal Auto-Parry")
+
+	local toggleAutoParryUI = TabPvP:CreateToggle({
+		Name = "Auto-Parry All Attacks",
+		CurrentValue = false,
+		Callback = function(v)
+			autoParryActive = v
+		end
+	})
+
+	TabPvP:CreateSlider({
+		Name = "Parry Distance",
+		Range = {5, 40},
+		Increment = 1,
+		CurrentValue = 22,
+		Suffix = "studs",
+		Callback = function(v) parryRange = v end
+	})
+
+	TabPvP:CreateSlider({
+		Name = "Parry Timing Window",
+		Range = {50, 300},
+		Increment = 10,
+		CurrentValue = 150,
+		Suffix = "ms",
+		Callback = function(v) parryHoldDuration = v / 1000 end
+	})
+
+	TabPvP:CreateToggle({
+		Name = "Parry Flying Projectiles / Spears",
+		CurrentValue = true,
+		Callback = function(v) parryProjectiles = v end
+	})
+
+	-- 3. Custom Keybinds for PvP
+	local customBinds = {
+		autoParry     = Enum.KeyCode.H,
+		hitboxExt     = Enum.KeyCode.J,
+		freeCamToggle = Enum.KeyCode.P,
+		teleportCam   = Enum.KeyCode.T,
+		resetCam      = Enum.KeyCode.R
+	}
+
+	TabPvP:CreateSection("PvP Keybinds")
+
+	TabPvP:CreateKeybind({
+		Name = "Bind: Auto-Parry Toggle",
+		CurrentKeybind = "H",
+		HoldToInteract = false,
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBinds.autoParry = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBinds.autoParry = Enum.KeyCode[k] end
+		end
+	})
+
+	TabPvP:CreateKeybind({
+		Name = "Bind: Hitbox Extender Toggle",
+		CurrentKeybind = "J",
+		HoldToInteract = false,
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBinds.hitboxExt = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBinds.hitboxExt = Enum.KeyCode[k] end
+		end
+	})
+
+	-- 4. Native FreeCam Engine (No Streaming)
+	local FC = {
+		Enabled = false,
+		FrozenCharacter = true,
+		Speed = 65,
+		BoostMultiplier = 3.0,
+		SlowMultiplier = 0.2,
+		Smoothness = 0.12,
+		MouseSensitivity = 0.22,
+		Fov = 70,
+		Roll = 0,
+		CamPos = Vector3.new(0, 50, 0),
+		CamRot = Vector2.new(0, 0),
+		Velocity = Vector3.new(0, 0, 0),
+		RotVelocity = Vector2.new(0, 0),
+		CurrentCFrame = CFrame.new(),
+		HoldingRMB = false,
+		MouseLookActive = false,
+		HudHidden = false,
+		MobileMove = Vector3.new(0, 0, 0),
+		OldCameraType = Enum.CameraType.Custom,
+		OldCameraSubject = nil,
+		OldCameraCFrame = CFrame.new(),
+		OldFov = 70,
+		OldWalkSpeed = 16,
+		OldJumpPower = 50,
+		OldRootAnchored = false
+	}
+
+	local cameraManager = nil
+	local SharedRegistries = nil
+	local rbxts_inc = ReplicatedStorage:FindFirstChild("rbxts_include")
+	local rtLib = rbxts_inc and rbxts_inc:FindFirstChild("RuntimeLib")
+	if rtLib then
+		pcall(function()
+			local v1 = require(rtLib)
+			cameraManager = v1.import(nil, ReplicatedStorage, "Game", "PriorityCamera").cameraManager
+			SharedRegistries = v1.import(nil, ReplicatedStorage, "Game", "registries").SharedRegistries
+		end)
+	end
+
+	local NATIVE_CAM_ID = "tdr_hub_freecam"
+	local nativeCameraDef = {
+		priority = 999999,
+		dataValidator = function() return true end,
+		render = function(ctx) return FC.CurrentCFrame, FC.Fov end
+	}
+	if SharedRegistries and SharedRegistries.Cameras and SharedRegistries.Cameras.values then
+		SharedRegistries.Cameras.values[NATIVE_CAM_ID] = nativeCameraDef
+	end
+
+	local function getMyRoot()
+		local c = lp.Character
+		return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c.PrimaryPart)
+	end
+	local function getMyHumanoid()
+		local c = lp.Character
+		return c and c:FindFirstChildOfClass("Humanoid")
+	end
+
+	local function SetFreeCam(enable)
+		if FC.Enabled == enable then return end
+		FC.Enabled = enable
+		local root = getMyRoot()
+		local hum = getMyHumanoid()
+
+		if FC.Enabled then
+			FC.OldCameraType = Camera.CameraType
+			FC.OldCameraSubject = Camera.CameraSubject
+			FC.OldCameraCFrame = Camera.CFrame
+			FC.OldFov = Camera.FieldOfView
+			FC.CamPos = Camera.CFrame.Position
+			local rx, ry, rz = Camera.CFrame:ToEulerAnglesYXZ()
+			FC.CamRot = Vector2.new(math.deg(rx), math.deg(ry))
+			FC.Roll = math.deg(rz)
+			FC.Velocity = Vector3.zero
+			FC.RotVelocity = Vector2.zero
+			FC.CurrentCFrame = Camera.CFrame
+
+			if SharedRegistries and SharedRegistries.Cameras and SharedRegistries.Cameras.values then
+				SharedRegistries.Cameras.values[NATIVE_CAM_ID] = nativeCameraDef
+			end
+			if cameraManager then
+				pcall(function() cameraManager:activateCamera(NATIVE_CAM_ID, {}) end)
+			end
+
+			Camera.CameraType = Enum.CameraType.Scriptable
+			Camera.CameraSubject = nil
+
+			if FC.FrozenCharacter then
+				if root then FC.OldRootAnchored = root.Anchored; root.Anchored = true end
+				if hum then FC.OldWalkSpeed = hum.WalkSpeed; FC.OldJumpPower = hum.JumpPower; hum.WalkSpeed = 0; hum.JumpPower = 0 end
+			end
+			FC.MouseLookActive = true
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+		else
+			if cameraManager then pcall(function() cameraManager:deactivateCamera(NATIVE_CAM_ID) end) end
+			Camera.CameraType = FC.OldCameraType or Enum.CameraType.Custom
+			if hum then Camera.CameraSubject = hum elseif root then Camera.CameraSubject = root end
+			Camera.FieldOfView = FC.OldFov or 70
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+
+			if root and FC.FrozenCharacter then root.Anchored = FC.OldRootAnchored end
+			if hum and FC.FrozenCharacter then
+				hum.WalkSpeed = (FC.OldWalkSpeed and FC.OldWalkSpeed > 0) and FC.OldWalkSpeed or 16
+				hum.JumpPower = (FC.OldJumpPower and FC.OldJumpPower > 0) and FC.OldJumpPower or 50
+			end
+			FC.MouseLookActive = false
+		end
+	end
+
+	local function TeleportPlayerToCam()
+		local root = getMyRoot()
+		if not root then return end
+		local targetPos = FC.CamPos + (FC.CurrentCFrame.LookVector * 2)
+		root.Anchored = false
+		root.CFrame = CFrame.new(targetPos, targetPos + FC.CurrentCFrame.LookVector)
+		if FC.Enabled and FC.FrozenCharacter then
+			task.defer(function() if root and FC.Enabled and FC.FrozenCharacter then root.Anchored = true end end)
+		end
+	end
+
+	local function ResetCamToPlayer()
+		local root = getMyRoot()
+		if not root then return end
+		FC.CamPos = root.Position + Vector3.new(0, 3, 0)
+		FC.Velocity = Vector3.zero
+	end
+
+	local lastFCTick = tick()
+	local function stepFCSim()
+		local now = tick()
+		local dt = math.min(now - lastFCTick, 0.1)
+		lastFCTick = now
+		if not FC.Enabled then return end
+
+		local isLooking = FC.HoldingRMB or FC.MouseLookActive
+		if isLooking then
+			local delta = UserInputService:GetMouseDelta()
+			if delta.Magnitude > 0 then
+				local targetRotVel = Vector2.new(-delta.Y * FC.MouseSensitivity, -delta.X * FC.MouseSensitivity)
+				FC.RotVelocity = FC.Smoothness > 0 and FC.RotVelocity:Lerp(targetRotVel, math.clamp(1 - FC.Smoothness, 0.05, 1)) or targetRotVel
+			else
+				FC.RotVelocity = FC.RotVelocity:Lerp(Vector2.zero, 0.25)
+			end
+		else
+			FC.RotVelocity = FC.RotVelocity:Lerp(Vector2.zero, 0.3)
+		end
+
+		FC.CamRot = FC.CamRot + FC.RotVelocity
+		FC.CamRot = Vector2.new(math.clamp(FC.CamRot.X, -89.9, 89.9), FC.CamRot.Y % 360)
+		local rotCFrame = CFrame.Angles(0, math.rad(FC.CamRot.Y), 0) * CFrame.Angles(math.rad(FC.CamRot.X), 0, math.rad(FC.Roll))
+
+		local move = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + rotCFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - rotCFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - rotCFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + rotCFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) or UserInputService:IsKeyDown(Enum.KeyCode.E) then move = move + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.Q) then move = move - Vector3.new(0, 1, 0) end
+
+		if FC.MobileMove.Magnitude > 0 then
+			move = move + (rotCFrame.LookVector * -FC.MobileMove.Z) + (rotCFrame.RightVector * FC.MobileMove.X) + (Vector3.new(0, 1, 0) * FC.MobileMove.Y)
+		end
+
+		local curSpeed = FC.Speed
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then curSpeed = curSpeed * FC.BoostMultiplier
+		elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then curSpeed = curSpeed * FC.SlowMultiplier end
+		if move.Magnitude > 0 then move = move.Unit * curSpeed end
+
+		FC.Velocity = FC.Smoothness > 0 and FC.Velocity:Lerp(move, math.clamp((1 - FC.Smoothness) * (dt * 60), 0.05, 1)) or move
+		FC.CamPos = FC.CamPos + (FC.Velocity * dt)
+		FC.CurrentCFrame = CFrame.new(FC.CamPos) * rotCFrame
+
+		Camera.CameraType = Enum.CameraType.Scriptable
+		Camera.CFrame = FC.CurrentCFrame
+		Camera.Focus = FC.CurrentCFrame
+		Camera.FieldOfView = FC.Fov
+	end
+
+	local FC_BIND = "TDR_Hub_FC_Step"
+	RunService:UnbindFromRenderStep(FC_BIND)
+	RunService:BindToRenderStep(FC_BIND, Enum.RenderPriority.Camera.Value + 2000, stepFCSim)
+
+	RunService.RenderStepped:Connect(function()
+		if FC.Enabled then
+			Camera.CameraType = Enum.CameraType.Scriptable
+			Camera.CFrame = FC.CurrentCFrame
+			Camera.Focus = FC.CurrentCFrame
+		end
+		if hitboxActive then
+			updateHitboxes()
+		end
+		if autoParryActive and parryProjectiles then
+			local myRoot = getMyRoot()
+			if myRoot then
+				for _, obj in ipairs(Workspace:GetChildren()) do
+					if obj:IsA("BasePart") or obj:IsA("Model") then
+						local p = obj:IsA("BasePart") and obj or obj.PrimaryPart
+						if p and p.AssemblyLinearVelocity.Magnitude > 30 then
+							local n = obj.Name:lower()
+							if n:find("spear") or n:find("arrow") or n:find("dagger") or n:find("proj") or n:find("rock") or n:find("charge") then
+								local toMe = (myRoot.Position - p.Position)
+								if toMe.Magnitude < (parryRange + 8) and p.AssemblyLinearVelocity.Unit:Dot(toMe.Unit) > 0.6 then
+									doParry("Projectile: " .. obj.Name)
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end)
+
+	UserInputService.InputBegan:Connect(function(inp, gp)
+		if gp then return end
+		local k = inp.KeyCode
+		if not k or k == Enum.KeyCode.Unknown then return end
+
+		if k == customBinds.freeCamToggle and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+			SetFreeCam(not FC.Enabled)
+		elseif k == customBinds.autoParry then
+			autoParryActive = not autoParryActive
+			pcall(function() toggleAutoParryUI:Set(autoParryActive) end)
+		elseif k == customBinds.hitboxExt then
+			hitboxActive = not hitboxActive
+			updateHitboxes()
+			pcall(function() toggleHitboxUI:Set(hitboxActive) end)
+		elseif k == customBinds.teleportCam and FC.Enabled then
+			TeleportPlayerToCam()
+		elseif k == customBinds.resetCam and FC.Enabled then
+			ResetCamToPlayer()
+		end
+	end)
 
 	-- ============ TAB: MISC ============
 	local TabMisc = Win:CreateTab("Misc", 4483362458)
+
+	TabMisc:CreateSection("FreeCam (No Streaming)")
+
+	TabMisc:CreateToggle({
+		Name = "FreeCam Active [Shift+P]",
+		CurrentValue = false,
+		Callback = function(v) SetFreeCam(v) end
+	})
+
+	TabMisc:CreateKeybind({
+		Name = "Bind: FreeCam Toggle",
+		CurrentKeybind = "P",
+		HoldToInteract = false,
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBinds.freeCamToggle = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBinds.freeCamToggle = Enum.KeyCode[k] end
+		end
+	})
+
+	TabMisc:CreateKeybind({
+		Name = "Bind: Teleport Body to Cam",
+		CurrentKeybind = "T",
+		HoldToInteract = false,
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBinds.teleportCam = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBinds.teleportCam = Enum.KeyCode[k] end
+		end
+	})
+
+	TabMisc:CreateKeybind({
+		Name = "Bind: Reset Cam to Body",
+		CurrentKeybind = "R",
+		HoldToInteract = false,
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBinds.resetCam = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBinds.resetCam = Enum.KeyCode[k] end
+		end
+	})
+
+	TabMisc:CreateButton({
+		Name = "📍 Teleport Body to Cam [T]",
+		Callback = function() TeleportPlayerToCam() end
+	})
+
+	TabMisc:CreateButton({
+		Name = "🔄 Reset Cam to Player [R]",
+		Callback = function() ResetCamToPlayer() end
+	})
+
+	TabMisc:CreateToggle({
+		Name = "🧊 Freeze Body during FreeCam",
+		CurrentValue = true,
+		Callback = function(v) FC.FrozenCharacter = v end
+	})
+
+	TabMisc:CreateSlider({
+		Name = "Flight Speed",
+		Range = {5, 400},
+		Increment = 5,
+		CurrentValue = 65,
+		Suffix = "studs/s",
+		Callback = function(v) FC.Speed = v end
+	})
+
+	TabMisc:CreateSlider({
+		Name = "Smoothness / Inertia",
+		Range = {0, 50},
+		Increment = 1,
+		CurrentValue = 12,
+		Suffix = "%",
+		Callback = function(v) FC.Smoothness = v / 100 end
+	})
+
+	TabMisc:CreateSlider({
+		Name = "Field of View (FOV)",
+		Range = {15, 120},
+		Increment = 1,
+		CurrentValue = 70,
+		Suffix = "°",
+		Callback = function(v) FC.Fov = v; if FC.Enabled then Camera.FieldOfView = v end end
+	})
+
+	TabMisc:CreateSection("General Utilities")
+
 
 	TabMisc:CreateButton({Name="force rescan items", Callback=function()
 		itemStamp = 0
@@ -1028,12 +1535,10 @@ local function runMobile()
 		end
 	end)
 
-	print("hub tdr loaded")
+	print("hub tdr loaded (mobile)")
 end
 
---------------------------------------------------
--- 💻 PC (Velocity-compatible)
---------------------------------------------------
+
 local function runPC()
 	local Players = game:GetService("Players")
 	local Workspace = game:GetService("Workspace")
@@ -1173,6 +1678,84 @@ local function runPC()
 
 		function Win:CreateTab(name)
 			local btn = new("TextButton", {
+				Size = UDim2.new(0, 90, 1, 0), BackgroundColor3 = ELEM, Text = name,
+				TextColor3 = WHITE, Font = Enum.Font.Gotham, TextSize = 13, AutoButtonColor = true,
+			}, tabBar)
+			new("UICorner", { CornerRadius = UDim.new(0, 6) }, btn)
+
+			local page = new("ScrollingFrame", {
+				Position = UDim2.new(0, 6, 0, 62), Size = UDim2.new(1, -12, 1, -68),
+				BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
+				CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				Visible = false,
+			}, main)
+			new("UIListLayout", { Padding = UDim.new(0, 4) }, page)
+			new("UIPadding", { PaddingRight = UDim.new(0, 6) }, page)
+
+			pages[#pages+1] = { page = page, btn = btn }
+			local function select()
+				for _, p in ipairs(pages) do
+					p.page.Visible = (p.page == page)
+					p.btn.BackgroundColor3 = (p.page == page) and ACC or ELEM
+				end
+			end
+			btn.MouseButton1Click:Connect(select)
+			if #pages == 1 then select() end
+
+			local function box(h)
+				local f = new("Frame", {
+					Size = UDim2.new(1, 0, 0, h), BackgroundColor3 = ELEM, BorderSizePixel = 0,
+				}, page)
+				new("UICorner", { CornerRadius = UDim.new(0, 6) }, f)
+				return f
+			end
+			local function label(parent, text, size, pos)
+				return new("TextLabel", {
+					Size = size or UDim2.new(1, -12, 0, 20), Position = pos or UDim2.new(0, 6, 0, 0),
+					BackgroundTransparency = 1, Text = text, TextColor3 = WHITE,
+					Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+				}, parent)
+			end
+
+			local T = {}
+
+			function T:CreateSection(title)
+				local f = new("Frame", {
+					Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, BorderSizePixel = 0
+				}, page)
+				new("TextLabel", {
+					Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "— " .. tostring(title) .. " —",
+					TextColor3 = ACC, Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Center
+				}, f)
+			end
+
+			function T:CreateKeybind(o)
+				local key = o.CurrentKeybind or "None"
+				local f = box(30)
+				label(f, o.Name, UDim2.new(0.6, -6, 1, 0))
+				local b = new("TextButton", {
+					Position = UDim2.new(0.6, 0, 0, 3), Size = UDim2.new(0.4, -6, 1, -6),
+					BackgroundColor3 = BG, TextColor3 = ACC, Text = "[" .. tostring(key) .. "]",
+					Font = Enum.Font.GothamBold, TextSize = 12
+				}, f)
+				new("UICorner", { CornerRadius = UDim.new(0, 4) }, b)
+				local listening = false
+				b.MouseButton1Click:Connect(function()
+					listening = true
+					b.Text = "[...]"
+					b.TextColor3 = Color3.fromRGB(255, 200, 0)
+				end)
+				UserInputService.InputBegan:Connect(function(inp, gp)
+					if listening and inp.UserInputType == Enum.UserInputType.Keyboard then
+						listening = false
+						key = inp.KeyCode.Name
+						b.Text = "[" .. tostring(key) .. "]"
+						b.TextColor3 = ACC
+						if o.Callback then safeSpawn(o.Callback, key) end
+					end
+				end)
+			end
+
 				Size = UDim2.new(0, 90, 1, 0), BackgroundColor3 = ELEM, Text = name,
 				TextColor3 = WHITE, Font = Enum.Font.Gotham, TextSize = 13, AutoButtonColor = true,
 			}, tabBar)
@@ -2166,8 +2749,587 @@ local function runPC()
 		pInspectInfo:Set({Title="info", Content=ok and "copied!" or "err: "..tostring(err)})
 	end})
 
+
+	-- ============ TAB: PVP ============
+	local TabPvP = Win:CreateTab("PvP")
+
+	-- 1. Hitbox Extender State
+	local hitboxActive = false
+	local hitboxSize = 15
+	local hitboxTransparency = 0.6
+	local modifiedHitboxes = {}
+
+	local function restoreHitboxes()
+		for part, data in pairs(modifiedHitboxes) do
+			if part and part.Parent then
+				pcall(function()
+					part.Size = data.origSize or Vector3.new(2, 2, 1)
+					part.Transparency = data.origTransparency or 1
+					part.CanCollide = data.origCanCollide or false
+				end)
+			end
+		end
+		table.clear(modifiedHitboxes)
+	end
+
+	local function updateHitboxes()
+		if not hitboxActive then
+			restoreHitboxes()
+			return
+		end
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= lp and p.Character then
+				local hrp = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Torso")
+				if hrp and hrp:IsA("BasePart") then
+					if not modifiedHitboxes[hrp] then
+						modifiedHitboxes[hrp] = {
+							origSize = hrp.Size,
+							origTransparency = hrp.Transparency,
+							origCanCollide = hrp.CanCollide
+						}
+					end
+					hrp.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+					hrp.Transparency = hitboxTransparency
+					hrp.CanCollide = false
+					hrp.Massless = true
+				end
+			end
+		end
+	end
+
+	TabPvP:CreateSection("Player Hitbox Extender")
+
+	local toggleHitboxUIPC = TabPvP:CreateToggle({
+		Name = "Hitbox Extender",
+		CurrentValue = false,
+		Callback = function(v)
+			hitboxActive = v
+			updateHitboxes()
+		end
+	})
+
+	TabPvP:CreateSlider({
+		Name = "Hitbox Size",
+		Range = {2, 40},
+		Increment = 1,
+		CurrentValue = 15,
+		Suffix = "studs",
+		Callback = function(v)
+			hitboxSize = v
+			if hitboxActive then updateHitboxes() end
+		end
+	})
+
+	TabPvP:CreateSlider({
+		Name = "Hitbox Transparency",
+		Range = {0, 100},
+		Increment = 5,
+		CurrentValue = 60,
+		Suffix = "%",
+		Callback = function(v)
+			hitboxTransparency = v / 100
+			if hitboxActive then updateHitboxes() end
+		end
+	})
+
+	-- 2. Universal Auto-Parry State
+	local autoParryActive = false
+	local parryRange = 22
+	local parryHoldDuration = 0.15
+	local parryProjectiles = true
+	local lastParryTick = 0
+
+	local function triggerBlockAction(state)
+		pcall(function()
+			if remAction then
+				remAction:FireServer("block", state)
+			elseif remotes and remotes.player and remotes.player.input and remotes.player.input.action then
+				remotes.player.input.action:fire("block", state)
+			end
+		end)
+	end
+
+	local function doParry(reason)
+		local now = tick()
+		if now - lastParryTick < (parryHoldDuration + 0.05) then return end
+		lastParryTick = now
+		
+		task.spawn(function()
+			triggerBlockAction(Enum.UserInputState.Begin)
+			task.wait(parryHoldDuration)
+			triggerBlockAction(Enum.UserInputState.End)
+		end)
+	end
+
+	local knownAttackKeywords = {
+		"attack", "m1", "m2", "swing", "slash", "stab", "strike", "thrust", "slam",
+		"cleave", "smash", "ability", "combo", "stomp", "spear", "hammer", "greataxe",
+		"dagger", "machete", "scythe", "hacksaw", "tomahawk", "crush", "punch", "kick",
+		"root_trap", "toxic_gas", "spit", "bite", "claw", "reap", "charged", "dash_attack"
+	}
+
+	local function isAttackTrack(track)
+		local name = (track.Name or ""):lower()
+		for _, kw in ipairs(knownAttackKeywords) do
+			if string.find(name, kw) then return true end
+		end
+		if track.Priority == Enum.AnimationPriority.Action or track.Priority == Enum.AnimationPriority.Action2 or track.Priority == Enum.AnimationPriority.Action3 or track.Priority == Enum.AnimationPriority.Action4 then
+			if not string.find(name, "idle") and not string.find(name, "walk") and not string.find(name, "run") and not string.find(name, "jump") and not string.find(name, "fall") and not string.find(name, "sit") and not string.find(name, "hold") then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function hookCharAnimations(c)
+		if not c or c == lp.Character then return end
+		local hum = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid", 3)
+		if not hum then return end
+		local anim = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
+		if not anim then return end
+
+		anim.AnimationPlayed:Connect(function(track)
+			if not autoParryActive then return end
+			local myChar = lp.Character
+			local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+			local enemyRoot = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c.PrimaryPart
+			if not myRoot or not enemyRoot then return end
+
+			local dist = (myRoot.Position - enemyRoot.Position).Magnitude
+			if dist > parryRange then return end
+			if not isAttackTrack(track) then return end
+
+			local ping = 0.05
+			pcall(function()
+				ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+			end)
+			ping = math.clamp(ping, 0.02, 0.25)
+
+			local animLen = track.Length > 0.1 and track.Length or 0.6
+			local hitDelay = math.max(0.01, (animLen * 0.35) - ping)
+
+			task.delay(hitDelay, function()
+				if autoParryActive and c and c.Parent and myChar and myChar.Parent then
+					local curDist = (myRoot.Position - enemyRoot.Position).Magnitude
+					if curDist <= (parryRange + 6) then
+						doParry("Attack: " .. tostring(track.Name))
+					end
+				end
+			end)
+		end)
+	end
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= lp and p.Character then hookCharAnimations(p.Character) end
+		p.CharacterAdded:Connect(hookCharAnimations)
+	end
+	Players.PlayerAdded:Connect(function(p)
+		p.CharacterAdded:Connect(hookCharAnimations)
+	end)
+
+	for _, m in ipairs(Workspace:GetChildren()) do
+		if m:IsA("Model") and m ~= lp.Character and m:FindFirstChildOfClass("Humanoid") then
+			hookCharAnimations(m)
+		end
+	end
+	Workspace.ChildAdded:Connect(function(m)
+		if m:IsA("Model") and m ~= lp.Character then
+			task.wait(0.2)
+			if m:FindFirstChildOfClass("Humanoid") then
+				hookCharAnimations(m)
+			end
+		end
+	end)
+
+	TabPvP:CreateSection("Universal Auto-Parry")
+
+	local toggleAutoParryUIPC = TabPvP:CreateToggle({
+		Name = "Auto-Parry All Attacks",
+		CurrentValue = false,
+		Callback = function(v)
+			autoParryActive = v
+		end
+	})
+
+	TabPvP:CreateSlider({
+		Name = "Parry Distance",
+		Range = {5, 40},
+		Increment = 1,
+		CurrentValue = 22,
+		Suffix = "studs",
+		Callback = function(v) parryRange = v end
+	})
+
+	TabPvP:CreateSlider({
+		Name = "Parry Timing Window",
+		Range = {50, 300},
+		Increment = 10,
+		CurrentValue = 150,
+		Suffix = "ms",
+		Callback = function(v) parryHoldDuration = v / 1000 end
+	})
+
+	TabPvP:CreateToggle({
+		Name = "Parry Flying Projectiles / Spears",
+		CurrentValue = true,
+		Callback = function(v) parryProjectiles = v end
+	})
+
+	-- 3. Custom Keybinds for PvP
+	local customBindsPC = {
+		autoParry     = Enum.KeyCode.H,
+		hitboxExt     = Enum.KeyCode.J,
+		freeCamToggle = Enum.KeyCode.P,
+		teleportCam   = Enum.KeyCode.T,
+		resetCam      = Enum.KeyCode.R,
+		hideHud       = Enum.KeyCode.K
+	}
+
+	TabPvP:CreateSection("PvP Keybinds")
+
+	TabPvP:CreateKeybind({
+		Name = "Bind: Auto-Parry Toggle",
+		CurrentKeybind = "H",
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBindsPC.autoParry = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBindsPC.autoParry = Enum.KeyCode[k] end
+		end
+	})
+
+	TabPvP:CreateKeybind({
+		Name = "Bind: Hitbox Extender Toggle",
+		CurrentKeybind = "J",
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBindsPC.hitboxExt = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBindsPC.hitboxExt = Enum.KeyCode[k] end
+		end
+	})
+
+	-- 4. Native FreeCam Engine (No Streaming)
+	local FC = {
+		Enabled = false,
+		FrozenCharacter = true,
+		Speed = 65,
+		BoostMultiplier = 3.0,
+		SlowMultiplier = 0.2,
+		Smoothness = 0.12,
+		MouseSensitivity = 0.22,
+		Fov = 70,
+		Roll = 0,
+		CamPos = Vector3.new(0, 50, 0),
+		CamRot = Vector2.new(0, 0),
+		Velocity = Vector3.new(0, 0, 0),
+		RotVelocity = Vector2.new(0, 0),
+		CurrentCFrame = CFrame.new(),
+		HoldingRMB = false,
+		MouseLookActive = false,
+		HudHidden = false,
+		OldCameraType = Enum.CameraType.Custom,
+		OldCameraSubject = nil,
+		OldCameraCFrame = CFrame.new(),
+		OldFov = 70,
+		OldWalkSpeed = 16,
+		OldJumpPower = 50,
+		OldRootAnchored = false
+	}
+
+	local cameraManager = nil
+	local SharedRegistries = nil
+	local rbxts_inc = ReplicatedStorage:FindFirstChild("rbxts_include")
+	local rtLib = rbxts_inc and rbxts_inc:FindFirstChild("RuntimeLib")
+	if rtLib then
+		pcall(function()
+			local v1 = require(rtLib)
+			cameraManager = v1.import(nil, ReplicatedStorage, "Game", "PriorityCamera").cameraManager
+			SharedRegistries = v1.import(nil, ReplicatedStorage, "Game", "registries").SharedRegistries
+		end)
+	end
+
+	local NATIVE_CAM_ID = "tdr_hub_freecam"
+	local nativeCameraDef = {
+		priority = 999999,
+		dataValidator = function() return true end,
+		render = function(ctx) return FC.CurrentCFrame, FC.Fov end
+	}
+	if SharedRegistries and SharedRegistries.Cameras and SharedRegistries.Cameras.values then
+		SharedRegistries.Cameras.values[NATIVE_CAM_ID] = nativeCameraDef
+	end
+
+	local function getMyRoot()
+		local c = lp.Character
+		return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c.PrimaryPart)
+	end
+	local function getMyHumanoid()
+		local c = lp.Character
+		return c and c:FindFirstChildOfClass("Humanoid")
+	end
+
+	local function SetFreeCam(enable)
+		if FC.Enabled == enable then return end
+		FC.Enabled = enable
+		local root = getMyRoot()
+		local hum = getMyHumanoid()
+
+		if FC.Enabled then
+			FC.OldCameraType = Camera.CameraType
+			FC.OldCameraSubject = Camera.CameraSubject
+			FC.OldCameraCFrame = Camera.CFrame
+			FC.OldFov = Camera.FieldOfView
+			FC.CamPos = Camera.CFrame.Position
+			local rx, ry, rz = Camera.CFrame:ToEulerAnglesYXZ()
+			FC.CamRot = Vector2.new(math.deg(rx), math.deg(ry))
+			FC.Roll = math.deg(rz)
+			FC.Velocity = Vector3.zero
+			FC.RotVelocity = Vector2.zero
+			FC.CurrentCFrame = Camera.CFrame
+
+			if SharedRegistries and SharedRegistries.Cameras and SharedRegistries.Cameras.values then
+				SharedRegistries.Cameras.values[NATIVE_CAM_ID] = nativeCameraDef
+			end
+			if cameraManager then
+				pcall(function() cameraManager:activateCamera(NATIVE_CAM_ID, {}) end)
+			end
+
+			Camera.CameraType = Enum.CameraType.Scriptable
+			Camera.CameraSubject = nil
+
+			if FC.FrozenCharacter then
+				if root then FC.OldRootAnchored = root.Anchored; root.Anchored = true end
+				if hum then FC.OldWalkSpeed = hum.WalkSpeed; FC.OldJumpPower = hum.JumpPower; hum.WalkSpeed = 0; hum.JumpPower = 0 end
+			end
+			FC.MouseLookActive = true
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+		else
+			if cameraManager then pcall(function() cameraManager:deactivateCamera(NATIVE_CAM_ID) end) end
+			Camera.CameraType = FC.OldCameraType or Enum.CameraType.Custom
+			if hum then Camera.CameraSubject = hum elseif root then Camera.CameraSubject = root end
+			Camera.FieldOfView = FC.OldFov or 70
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+
+			if root and FC.FrozenCharacter then root.Anchored = FC.OldRootAnchored end
+			if hum and FC.FrozenCharacter then
+				hum.WalkSpeed = (FC.OldWalkSpeed and FC.OldWalkSpeed > 0) and FC.OldWalkSpeed or 16
+				hum.JumpPower = (FC.OldJumpPower and FC.OldJumpPower > 0) and FC.OldJumpPower or 50
+			end
+			FC.MouseLookActive = false
+		end
+	end
+
+	local function TeleportPlayerToCam()
+		local root = getMyRoot()
+		if not root then return end
+		local targetPos = FC.CamPos + (FC.CurrentCFrame.LookVector * 2)
+		root.Anchored = false
+		root.CFrame = CFrame.new(targetPos, targetPos + FC.CurrentCFrame.LookVector)
+		if FC.Enabled and FC.FrozenCharacter then
+			task.defer(function() if root and FC.Enabled and FC.FrozenCharacter then root.Anchored = true end end)
+		end
+	end
+
+	local function ResetCamToPlayer()
+		local root = getMyRoot()
+		if not root then return end
+		FC.CamPos = root.Position + Vector3.new(0, 3, 0)
+		FC.Velocity = Vector3.zero
+	end
+
+	local lastFCTick = tick()
+	local function stepFCSim()
+		local now = tick()
+		local dt = math.min(now - lastFCTick, 0.1)
+		lastFCTick = now
+		if not FC.Enabled then return end
+
+		local isLooking = FC.HoldingRMB or FC.MouseLookActive
+		if isLooking then
+			local delta = UserInputService:GetMouseDelta()
+			if delta.Magnitude > 0 then
+				local targetRotVel = Vector2.new(-delta.Y * FC.MouseSensitivity, -delta.X * FC.MouseSensitivity)
+				FC.RotVelocity = FC.Smoothness > 0 and FC.RotVelocity:Lerp(targetRotVel, math.clamp(1 - FC.Smoothness, 0.05, 1)) or targetRotVel
+			else
+				FC.RotVelocity = FC.RotVelocity:Lerp(Vector2.zero, 0.25)
+			end
+		else
+			FC.RotVelocity = FC.RotVelocity:Lerp(Vector2.zero, 0.3)
+		end
+
+		FC.CamRot = FC.CamRot + FC.RotVelocity
+		FC.CamRot = Vector2.new(math.clamp(FC.CamRot.X, -89.9, 89.9), FC.CamRot.Y % 360)
+		local rotCFrame = CFrame.Angles(0, math.rad(FC.CamRot.Y), 0) * CFrame.Angles(math.rad(FC.CamRot.X), 0, math.rad(FC.Roll))
+
+		local move = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + rotCFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - rotCFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - rotCFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + rotCFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) or UserInputService:IsKeyDown(Enum.KeyCode.E) then move = move + Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.Q) then move = move - Vector3.new(0, 1, 0) end
+
+		local curSpeed = FC.Speed
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then curSpeed = curSpeed * FC.BoostMultiplier
+		elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then curSpeed = curSpeed * FC.SlowMultiplier end
+		if move.Magnitude > 0 then move = move.Unit * curSpeed end
+
+		FC.Velocity = FC.Smoothness > 0 and FC.Velocity:Lerp(move, math.clamp((1 - FC.Smoothness) * (dt * 60), 0.05, 1)) or move
+		FC.CamPos = FC.CamPos + (FC.Velocity * dt)
+		FC.CurrentCFrame = CFrame.new(FC.CamPos) * rotCFrame
+
+		Camera.CameraType = Enum.CameraType.Scriptable
+		Camera.CFrame = FC.CurrentCFrame
+		Camera.Focus = FC.CurrentCFrame
+		Camera.FieldOfView = FC.Fov
+	end
+
+	local FC_BIND_PC = "TDR_Hub_FC_Step_PC"
+	RunService:UnbindFromRenderStep(FC_BIND_PC)
+	RunService:BindToRenderStep(FC_BIND_PC, Enum.RenderPriority.Camera.Value + 2000, stepFCSim)
+
+	RunService.RenderStepped:Connect(function()
+		if FC.Enabled then
+			Camera.CameraType = Enum.CameraType.Scriptable
+			Camera.CFrame = FC.CurrentCFrame
+			Camera.Focus = FC.CurrentCFrame
+		end
+		if hitboxActive then
+			updateHitboxes()
+		end
+		if autoParryActive and parryProjectiles then
+			local myRoot = getMyRoot()
+			if myRoot then
+				for _, obj in ipairs(Workspace:GetChildren()) do
+					if obj:IsA("BasePart") or obj:IsA("Model") then
+						local p = obj:IsA("BasePart") and obj or obj.PrimaryPart
+						if p and p.AssemblyLinearVelocity.Magnitude > 30 then
+							local n = obj.Name:lower()
+							if n:find("spear") or n:find("arrow") or n:find("dagger") or n:find("proj") or n:find("rock") or n:find("charge") then
+								local toMe = (myRoot.Position - p.Position)
+								if toMe.Magnitude < (parryRange + 8) and p.AssemblyLinearVelocity.Unit:Dot(toMe.Unit) > 0.6 then
+									doParry("Projectile: " .. obj.Name)
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end)
+
+	UserInputService.InputBegan:Connect(function(inp, gp)
+		if gp then return end
+		local k = inp.KeyCode
+		if not k or k == Enum.KeyCode.Unknown then return end
+
+		if k == customBindsPC.freeCamToggle and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+			SetFreeCam(not FC.Enabled)
+		elseif k == customBindsPC.autoParry then
+			autoParryActive = not autoParryActive
+			pcall(function() toggleAutoParryUIPC.Set(autoParryActive) end)
+		elseif k == customBindsPC.hitboxExt then
+			hitboxActive = not hitboxActive
+			updateHitboxes()
+			pcall(function() toggleHitboxUIPC.Set(hitboxActive) end)
+		elseif k == customBindsPC.teleportCam and FC.Enabled then
+			TeleportPlayerToCam()
+		elseif k == customBindsPC.resetCam and FC.Enabled then
+			ResetCamToPlayer()
+		elseif k == customBindsPC.hideHud then
+			FC.HudHidden = not FC.HudHidden
+			Win.Main.Visible = not FC.HudHidden
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton2 then
+			FC.HoldingRMB = false
+			if not FC.MouseLookActive then
+				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			end
+		end
+	end)
+
 	-- ============ TAB: MISC ============
 	local TabMisc = Win:CreateTab("Misc")
+
+	TabMisc:CreateSection("FreeCam (No Streaming)")
+
+	TabMisc:CreateToggle({
+		Name = "FreeCam Active [Shift+P]",
+		CurrentValue = false,
+		Callback = function(v) SetFreeCam(v) end
+	})
+
+	TabMisc:CreateKeybind({
+		Name = "Bind: FreeCam Toggle",
+		CurrentKeybind = "P",
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBindsPC.freeCamToggle = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBindsPC.freeCamToggle = Enum.KeyCode[k] end
+		end
+	})
+
+	TabMisc:CreateKeybind({
+		Name = "Bind: Teleport Body to Cam",
+		CurrentKeybind = "T",
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBindsPC.teleportCam = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBindsPC.teleportCam = Enum.KeyCode[k] end
+		end
+	})
+
+	TabMisc:CreateKeybind({
+		Name = "Bind: Reset Cam to Body",
+		CurrentKeybind = "R",
+		Callback = function(k)
+			if typeof(k) == "EnumItem" then customBindsPC.resetCam = k
+			elseif typeof(k) == "string" and Enum.KeyCode[k] then customBindsPC.resetCam = Enum.KeyCode[k] end
+		end
+	})
+
+	TabMisc:CreateButton({
+		Name = "📍 Teleport Body to Cam [T]",
+		Callback = function() TeleportPlayerToCam() end
+	})
+
+	TabMisc:CreateButton({
+		Name = "🔄 Reset Cam to Player [R]",
+		Callback = function() ResetCamToPlayer() end
+	})
+
+	TabMisc:CreateToggle({
+		Name = "🧊 Freeze Body during FreeCam",
+		CurrentValue = true,
+		Callback = function(v) FC.FrozenCharacter = v end
+	})
+
+	TabMisc:CreateSlider({
+		Name = "Flight Speed",
+		Range = {5, 400},
+		Increment = 5,
+		CurrentValue = 65,
+		Suffix = "studs/s",
+		Callback = function(v) FC.Speed = v end
+	})
+
+	TabMisc:CreateSlider({
+		Name = "Smoothness / Inertia",
+		Range = {0, 50},
+		Increment = 1,
+		CurrentValue = 12,
+		Suffix = "%",
+		Callback = function(v) FC.Smoothness = v / 100 end
+	})
+
+	TabMisc:CreateSlider({
+		Name = "Field of View (FOV)",
+		Range = {15, 120},
+		Increment = 1,
+		CurrentValue = 70,
+		Suffix = "°",
+		Callback = function(v) FC.Fov = v; if FC.Enabled then Camera.FieldOfView = v end end
+	})
+
+	TabMisc:CreateSection("General Utilities")
+
 
 	TabMisc:CreateButton({Name="force rescan items", Callback=function()
 		itemStamp = 0
