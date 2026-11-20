@@ -897,10 +897,10 @@ local function runMobile()
 	end})
 
 
-	-- ============ TAB: PVP ============
+	-- ============ TAB: PVP (PLAYERS ONLY) ============
 	local TabPvP = Win:CreateTab("PvP", 4483362458)
 
-	-- 1. Hitbox Extender State
+	-- 1. Player Hitbox Extender State
 	local hitboxActive = false
 	local hitboxSize = 15
 	local hitboxTransparency = 0.6
@@ -947,7 +947,7 @@ local function runMobile()
 	TabPvP:CreateSection("Player Hitbox Extender")
 
 	local toggleHitboxUI = TabPvP:CreateToggle({
-		Name = "Hitbox Extender",
+		Name = "Player Hitbox Extender",
 		CurrentValue = false,
 		Callback = function(v)
 			hitboxActive = v
@@ -979,7 +979,7 @@ local function runMobile()
 		end
 	})
 
-	-- 2. Universal Auto-Parry State
+	-- 2. Player Auto-Parry State (Strictly for other players)
 	local autoParryActive = false
 	local parryRange = 22
 	local parryHoldDuration = 0.15
@@ -1011,8 +1011,7 @@ local function runMobile()
 	local knownAttackKeywords = {
 		"attack", "m1", "m2", "swing", "slash", "stab", "strike", "thrust", "slam",
 		"cleave", "smash", "ability", "combo", "stomp", "spear", "hammer", "greataxe",
-		"dagger", "machete", "scythe", "hacksaw", "tomahawk", "crush", "punch", "kick",
-		"root_trap", "toxic_gas", "spit", "bite", "claw", "reap", "charged", "dash_attack"
+		"dagger", "machete", "scythe", "hacksaw", "tomahawk", "punch", "kick", "reap", "charged"
 	}
 
 	local function isAttackTrack(track)
@@ -1028,70 +1027,60 @@ local function runMobile()
 		return false
 	end
 
-	local function hookCharAnimations(c)
-		if not c or c == lp.Character then return end
-		local hum = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid", 3)
-		if not hum then return end
-		local anim = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
-		if not anim then return end
+	local function hookPlayerAnimations(player)
+		if not player or player == lp then return end
+		local function onChar(char)
+			if not char then return end
+			local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3)
+			if not hum then return end
+			local anim = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
+			if not anim then return end
 
-		anim.AnimationPlayed:Connect(function(track)
-			if not autoParryActive then return end
-			local myChar = lp.Character
-			local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
-			local enemyRoot = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c.PrimaryPart
-			if not myRoot or not enemyRoot then return end
+			anim.AnimationPlayed:Connect(function(track)
+				if not autoParryActive then return end
+				local myChar = lp.Character
+				local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+				local enemyRoot = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char.PrimaryPart
+				if not myRoot or not enemyRoot then return end
 
-			local dist = (myRoot.Position - enemyRoot.Position).Magnitude
-			if dist > parryRange then return end
-			if not isAttackTrack(track) then return end
+				local dist = (myRoot.Position - enemyRoot.Position).Magnitude
+				if dist > parryRange then return end
+				if not isAttackTrack(track) then return end
 
-			local ping = 0.05
-			pcall(function()
-				ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
-			end)
-			ping = math.clamp(ping, 0.02, 0.25)
+				local ping = 0.05
+				pcall(function()
+					ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+				end)
+				ping = math.clamp(ping, 0.02, 0.25)
 
-			local animLen = track.Length > 0.1 and track.Length or 0.6
-			local hitDelay = math.max(0.01, (animLen * 0.35) - ping)
+				local animLen = track.Length > 0.1 and track.Length or 0.5
+				local hitDelay = math.max(0.01, (animLen * 0.35) - ping)
 
-			task.delay(hitDelay, function()
-				if autoParryActive and c and c.Parent and myChar and myChar.Parent then
-					local curDist = (myRoot.Position - enemyRoot.Position).Magnitude
-					if curDist <= (parryRange + 6) then
-						doParry("Attack: " .. tostring(track.Name))
+				task.delay(hitDelay, function()
+					if autoParryActive and char and char.Parent and myChar and myChar.Parent then
+						local curDist = (myRoot.Position - enemyRoot.Position).Magnitude
+						if curDist <= (parryRange + 6) then
+							doParry("Player Attack: " .. tostring(track.Name))
+						end
 					end
-				end
+				end)
 			end)
-		end)
+		end
+		if player.Character then onChar(player.Character) end
+		player.CharacterAdded:Connect(onChar)
 	end
 
 	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= lp and p.Character then hookCharAnimations(p.Character) end
-		p.CharacterAdded:Connect(hookCharAnimations)
+		if p ~= lp then hookPlayerAnimations(p) end
 	end
 	Players.PlayerAdded:Connect(function(p)
-		p.CharacterAdded:Connect(hookCharAnimations)
+		if p ~= lp then hookPlayerAnimations(p) end
 	end)
 
-	for _, m in ipairs(Workspace:GetChildren()) do
-		if m:IsA("Model") and m ~= lp.Character and m:FindFirstChildOfClass("Humanoid") then
-			hookCharAnimations(m)
-		end
-	end
-	Workspace.ChildAdded:Connect(function(m)
-		if m:IsA("Model") and m ~= lp.Character then
-			task.wait(0.2)
-			if m:FindFirstChildOfClass("Humanoid") then
-				hookCharAnimations(m)
-			end
-		end
-	end)
-
-	TabPvP:CreateSection("Universal Auto-Parry")
+	TabPvP:CreateSection("Player Auto-Parry")
 
 	local toggleAutoParryUI = TabPvP:CreateToggle({
-		Name = "Auto-Parry All Attacks",
+		Name = "Player Auto-Parry",
 		CurrentValue = false,
 		Callback = function(v)
 			autoParryActive = v
@@ -1117,12 +1106,12 @@ local function runMobile()
 	})
 
 	TabPvP:CreateToggle({
-		Name = "Parry Flying Projectiles / Spears",
+		Name = "Parry Thrown Projectiles / Spears",
 		CurrentValue = true,
 		Callback = function(v) parryProjectiles = v end
 	})
 
-	-- 3. Custom Keybinds for PvP
+	-- 3. Custom Keybinds for PvP (Player focused)
 	local customBinds = {
 		autoParry     = Enum.KeyCode.H,
 		hitboxExt     = Enum.KeyCode.J,
@@ -1357,7 +1346,7 @@ local function runMobile()
 							if n:find("spear") or n:find("arrow") or n:find("dagger") or n:find("proj") or n:find("rock") or n:find("charge") then
 								local toMe = (myRoot.Position - p.Position)
 								if toMe.Magnitude < (parryRange + 8) and p.AssemblyLinearVelocity.Unit:Dot(toMe.Unit) > 0.6 then
-									doParry("Projectile: " .. obj.Name)
+									doParry("Player Projectile: " .. obj.Name)
 								end
 							end
 						end
@@ -2750,10 +2739,10 @@ local function runPC()
 	end})
 
 
-	-- ============ TAB: PVP ============
+	-- ============ TAB: PVP (PLAYERS ONLY) ============
 	local TabPvP = Win:CreateTab("PvP")
 
-	-- 1. Hitbox Extender State
+	-- 1. Player Hitbox Extender State
 	local hitboxActive = false
 	local hitboxSize = 15
 	local hitboxTransparency = 0.6
@@ -2800,7 +2789,7 @@ local function runPC()
 	TabPvP:CreateSection("Player Hitbox Extender")
 
 	local toggleHitboxUIPC = TabPvP:CreateToggle({
-		Name = "Hitbox Extender",
+		Name = "Player Hitbox Extender",
 		CurrentValue = false,
 		Callback = function(v)
 			hitboxActive = v
@@ -2832,7 +2821,7 @@ local function runPC()
 		end
 	})
 
-	-- 2. Universal Auto-Parry State
+	-- 2. Player Auto-Parry State (Strictly for other players)
 	local autoParryActive = false
 	local parryRange = 22
 	local parryHoldDuration = 0.15
@@ -2864,8 +2853,7 @@ local function runPC()
 	local knownAttackKeywords = {
 		"attack", "m1", "m2", "swing", "slash", "stab", "strike", "thrust", "slam",
 		"cleave", "smash", "ability", "combo", "stomp", "spear", "hammer", "greataxe",
-		"dagger", "machete", "scythe", "hacksaw", "tomahawk", "crush", "punch", "kick",
-		"root_trap", "toxic_gas", "spit", "bite", "claw", "reap", "charged", "dash_attack"
+		"dagger", "machete", "scythe", "hacksaw", "tomahawk", "punch", "kick", "reap", "charged"
 	}
 
 	local function isAttackTrack(track)
@@ -2881,70 +2869,60 @@ local function runPC()
 		return false
 	end
 
-	local function hookCharAnimations(c)
-		if not c or c == lp.Character then return end
-		local hum = c:FindFirstChildOfClass("Humanoid") or c:WaitForChild("Humanoid", 3)
-		if not hum then return end
-		local anim = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
-		if not anim then return end
+	local function hookPlayerAnimations(player)
+		if not player or player == lp then return end
+		local function onChar(char)
+			if not char then return end
+			local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3)
+			if not hum then return end
+			local anim = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
+			if not anim then return end
 
-		anim.AnimationPlayed:Connect(function(track)
-			if not autoParryActive then return end
-			local myChar = lp.Character
-			local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
-			local enemyRoot = c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c.PrimaryPart
-			if not myRoot or not enemyRoot then return end
+			anim.AnimationPlayed:Connect(function(track)
+				if not autoParryActive then return end
+				local myChar = lp.Character
+				local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar:FindFirstChild("Torso"))
+				local enemyRoot = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char.PrimaryPart
+				if not myRoot or not enemyRoot then return end
 
-			local dist = (myRoot.Position - enemyRoot.Position).Magnitude
-			if dist > parryRange then return end
-			if not isAttackTrack(track) then return end
+				local dist = (myRoot.Position - enemyRoot.Position).Magnitude
+				if dist > parryRange then return end
+				if not isAttackTrack(track) then return end
 
-			local ping = 0.05
-			pcall(function()
-				ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
-			end)
-			ping = math.clamp(ping, 0.02, 0.25)
+				local ping = 0.05
+				pcall(function()
+					ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+				end)
+				ping = math.clamp(ping, 0.02, 0.25)
 
-			local animLen = track.Length > 0.1 and track.Length or 0.6
-			local hitDelay = math.max(0.01, (animLen * 0.35) - ping)
+				local animLen = track.Length > 0.1 and track.Length or 0.5
+				local hitDelay = math.max(0.01, (animLen * 0.35) - ping)
 
-			task.delay(hitDelay, function()
-				if autoParryActive and c and c.Parent and myChar and myChar.Parent then
-					local curDist = (myRoot.Position - enemyRoot.Position).Magnitude
-					if curDist <= (parryRange + 6) then
-						doParry("Attack: " .. tostring(track.Name))
+				task.delay(hitDelay, function()
+					if autoParryActive and char and char.Parent and myChar and myChar.Parent then
+						local curDist = (myRoot.Position - enemyRoot.Position).Magnitude
+						if curDist <= (parryRange + 6) then
+							doParry("Player Attack: " .. tostring(track.Name))
+						end
 					end
-				end
+				end)
 			end)
-		end)
+		end
+		if player.Character then onChar(player.Character) end
+		player.CharacterAdded:Connect(onChar)
 	end
 
 	for _, p in ipairs(Players:GetPlayers()) do
-		if p ~= lp and p.Character then hookCharAnimations(p.Character) end
-		p.CharacterAdded:Connect(hookCharAnimations)
+		if p ~= lp then hookPlayerAnimations(p) end
 	end
 	Players.PlayerAdded:Connect(function(p)
-		p.CharacterAdded:Connect(hookCharAnimations)
+		if p ~= lp then hookPlayerAnimations(p) end
 	end)
 
-	for _, m in ipairs(Workspace:GetChildren()) do
-		if m:IsA("Model") and m ~= lp.Character and m:FindFirstChildOfClass("Humanoid") then
-			hookCharAnimations(m)
-		end
-	end
-	Workspace.ChildAdded:Connect(function(m)
-		if m:IsA("Model") and m ~= lp.Character then
-			task.wait(0.2)
-			if m:FindFirstChildOfClass("Humanoid") then
-				hookCharAnimations(m)
-			end
-		end
-	end)
-
-	TabPvP:CreateSection("Universal Auto-Parry")
+	TabPvP:CreateSection("Player Auto-Parry")
 
 	local toggleAutoParryUIPC = TabPvP:CreateToggle({
-		Name = "Auto-Parry All Attacks",
+		Name = "Player Auto-Parry",
 		CurrentValue = false,
 		Callback = function(v)
 			autoParryActive = v
@@ -2970,12 +2948,12 @@ local function runPC()
 	})
 
 	TabPvP:CreateToggle({
-		Name = "Parry Flying Projectiles / Spears",
+		Name = "Parry Thrown Projectiles / Spears",
 		CurrentValue = true,
 		Callback = function(v) parryProjectiles = v end
 	})
 
-	-- 3. Custom Keybinds for PvP
+	-- 3. Custom Keybinds for PvP (Player focused)
 	local customBindsPC = {
 		autoParry     = Enum.KeyCode.H,
 		hitboxExt     = Enum.KeyCode.J,
@@ -3204,7 +3182,7 @@ local function runPC()
 							if n:find("spear") or n:find("arrow") or n:find("dagger") or n:find("proj") or n:find("rock") or n:find("charge") then
 								local toMe = (myRoot.Position - p.Position)
 								if toMe.Magnitude < (parryRange + 8) and p.AssemblyLinearVelocity.Unit:Dot(toMe.Unit) > 0.6 then
-									doParry("Projectile: " .. obj.Name)
+									doParry("Player Projectile: " .. obj.Name)
 								end
 							end
 						end
